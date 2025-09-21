@@ -66,6 +66,20 @@ STATE_SPECS: Dict[str, StateSpec] = {
         dict,
         "共通設定（単位・言語・FTEなど）",
     ),
+    "selected_industry_template": StateSpec(lambda: "", str, "選択された業種テンプレートキー"),
+    "working_capital_profile": StateSpec(
+        lambda: {"receivable_days": 45.0, "inventory_days": 30.0, "payable_days": 25.0},
+        dict,
+        "運転資本の想定（売掛・棚卸・買掛の回転日数）",
+    ),
+    "custom_kpi_selection": StateSpec(list, list, "ユーザーが選択したKPIカード"),
+    "industry_custom_metrics": StateSpec(dict, dict, "業種別KPI計算設定"),
+    "external_actuals": StateSpec(dict, dict, "外部データから取り込んだ実績値"),
+    "scenario_thresholds": StateSpec(
+        lambda: {"var_limit": None, "dscr_floor": 1.2, "var_confidence": 0.95},
+        dict,
+        "リスク管理用のVaR・DSCR閾値設定",
+    ),
 }
 
 

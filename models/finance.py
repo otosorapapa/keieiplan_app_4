@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Dict, Iterable, List, Literal, Sequence
+from typing import Dict, Iterable, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
@@ -46,10 +46,41 @@ class SalesItem(BaseModel):
     channel: str
     product: str
     monthly: MonthlySeries = Field(default_factory=MonthlySeries)
+    customers: Optional[Decimal] = None
+    unit_price: Optional[Decimal] = None
+    purchase_frequency: Optional[Decimal] = None
+    memo: Optional[str] = None
+
+    @field_validator("customers", "unit_price", "purchase_frequency", mode="before")
+    @classmethod
+    def _coerce_optional_decimal(cls, value: object) -> Optional[Decimal]:
+        if value in (None, "", "NaN"):
+            return None
+        return Decimal(str(value))
+
+    @property
+    def transactions(self) -> Decimal:
+        customers = self.customers or Decimal("0")
+        frequency = self.purchase_frequency or Decimal("1")
+        return customers * frequency
 
     @property
     def annual_total(self) -> Decimal:
         return self.monthly.total()
+
+    def assumption_snapshot(self) -> Dict[str, Decimal | str | None]:
+        """Return assumption metadata for downstream analytics."""
+
+        return {
+            "channel": self.channel,
+            "product": self.product,
+            "customers": self.customers,
+            "unit_price": self.unit_price,
+            "purchase_frequency": self.purchase_frequency,
+            "memo": self.memo,
+            "annual_sales": self.annual_total,
+            "transactions": self.transactions,
+        }
 
 
 class SalesPlan(BaseModel):
@@ -72,6 +103,44 @@ class SalesPlan(BaseModel):
 
     def products(self) -> List[str]:
         return sorted({item.product for item in self.items})
+
+    def assumption_summary(self) -> Dict[str, Decimal]:
+        """Aggregate assumption level metrics used for KPI customisation."""
+
+        total_sales = Decimal("0")
+        total_customers = Decimal("0")
+        total_transactions = Decimal("0")
+        weighted_price = Decimal("0")
+        weighted_frequency = Decimal("0")
+
+        for item in self.items:
+            annual_sales = item.annual_total
+            total_sales += annual_sales
+            customers = item.customers or Decimal("0")
+            unit_price = item.unit_price or Decimal("0")
+            frequency = item.purchase_frequency or Decimal("0")
+            transactions = item.transactions
+            total_customers += customers
+            total_transactions += transactions
+            if unit_price > 0 and transactions > 0:
+                weighted_price += unit_price * transactions
+            if frequency > 0 and customers > 0:
+                weighted_frequency += frequency * customers
+
+        avg_unit_price = (
+            weighted_price / total_transactions if total_transactions > 0 else Decimal("0")
+        )
+        avg_frequency = (
+            weighted_frequency / total_customers if total_customers > 0 else Decimal("0")
+        )
+
+        return {
+            "total_sales": total_sales,
+            "total_customers": total_customers,
+            "total_transactions": total_transactions,
+            "avg_unit_price": avg_unit_price,
+            "avg_frequency": avg_frequency,
+        }
 
 
 class CostPlan(BaseModel):
@@ -259,6 +328,10 @@ DEFAULT_SALES_PLAN = SalesPlan(
             channel="オンライン",
             product="主力製品",
             monthly=MonthlySeries(amounts=[Decimal("80000000")] * 12),
+            customers=Decimal("1200"),
+            unit_price=Decimal("80000"),
+            purchase_frequency=Decimal("1"),
+            memo="自社ECの既存顧客"
         ),
     ]
 )

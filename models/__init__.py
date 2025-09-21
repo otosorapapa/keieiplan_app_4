@@ -18,6 +18,7 @@ from .finance import (
     DEFAULT_SALES_PLAN,
     DEFAULT_TAX_POLICY,
 )
+from .industry import IndustryTemplate, IndustrySalesRow, INDUSTRY_TEMPLATES
 
 __all__ = [
     "CapexItem",
@@ -36,4 +37,7 @@ __all__ = [
     "DEFAULT_LOAN_SCHEDULE",
     "DEFAULT_SALES_PLAN",
     "DEFAULT_TAX_POLICY",
+    "IndustryTemplate",
+    "IndustrySalesRow",
+    "INDUSTRY_TEMPLATES",
 ]

@@ -16,6 +16,7 @@ from models import (
     DEFAULT_LOAN_SCHEDULE,
     DEFAULT_SALES_PLAN,
     DEFAULT_TAX_POLICY,
+    INDUSTRY_TEMPLATES,
     MONTH_SEQUENCE,
 )
 from state import ensure_session_defaults
@@ -46,6 +47,9 @@ validation_errors: List[ValidationIssue] = st.session_state.get("finance_validat
 
 
 MONTH_COLUMNS = [f"月{m:02d}" for m in MONTH_SEQUENCE]
+ASSUMPTION_NUMERIC_COLUMNS = ["想定顧客数", "客単価", "購入頻度(月)"]
+ASSUMPTION_TEXT_COLUMNS = ["メモ"]
+ASSUMPTION_COLUMNS = [*ASSUMPTION_NUMERIC_COLUMNS, *ASSUMPTION_TEXT_COLUMNS]
 SALES_TEMPLATE_STATE_KEY = "sales_template_df"
 SALES_CHANNEL_COUNTER_KEY = "sales_channel_counter"
 SALES_PRODUCT_COUNTER_KEY = "sales_product_counter"
@@ -59,6 +63,7 @@ ALLOWED_EXTENSIONS = {".csv", ".xlsx"}
 
 INPUT_WIZARD_STEP_KEY = "input_wizard_step"
 BUSINESS_CONTEXT_KEY = "business_context"
+INDUSTRY_TEMPLATE_KEY = "selected_industry_template"
 
 WIZARD_STEPS = [
     {
@@ -206,10 +211,20 @@ def _standardize_sales_df(df: pd.DataFrame) -> pd.DataFrame:
     base.columns = [str(col).strip() for col in base.columns]
     if "チャネル" not in base.columns or "商品" not in base.columns:
         raise ValueError("テンプレートには『チャネル』『商品』列が必要です。")
+    for column in ASSUMPTION_NUMERIC_COLUMNS:
+        if column not in base.columns:
+            base[column] = 0.0
+        base[column] = (
+            pd.to_numeric(base[column], errors="coerce").fillna(0.0).astype(float)
+        )
+    for column in ASSUMPTION_TEXT_COLUMNS:
+        if column not in base.columns:
+            base[column] = ""
+        base[column] = base[column].fillna("").astype(str)
     for month_col in MONTH_COLUMNS:
         if month_col not in base.columns:
             base[month_col] = 0.0
-    ordered = ["チャネル", "商品", *MONTH_COLUMNS]
+    ordered = ["チャネル", "商品", *ASSUMPTION_COLUMNS, *MONTH_COLUMNS]
     base = base[ordered]
     base["チャネル"] = base["チャネル"].fillna("").astype(str)
     base["商品"] = base["商品"].fillna("").astype(str)
@@ -335,6 +350,10 @@ def _sales_dataframe(data: Dict) -> pd.DataFrame:
         row: Dict[str, float | str] = {
             "チャネル": item.get("channel", ""),
             "商品": item.get("product", ""),
+            "想定顧客数": float(Decimal(str(item.get("customers", 0) or 0))),
+            "客単価": float(Decimal(str(item.get("unit_price", 0) or 0))),
+            "購入頻度(月)": float(Decimal(str(item.get("purchase_frequency", 0) or 0))),
+            "メモ": str(item.get("memo", "")),
         }
         monthly = item.get("monthly", {})
         amounts = monthly.get("amounts") if isinstance(monthly, dict) else None
@@ -349,9 +368,90 @@ def _sales_dataframe(data: Dict) -> pd.DataFrame:
             row[key] = float(value)
         rows.append(row)
     if not rows:
-        rows.append({"チャネル": "オンライン", "商品": "主力製品", **{f"月{m:02d}": 0.0 for m in MONTH_SEQUENCE}})
+        rows.append(
+            {
+                "チャネル": "オンライン",
+                "商品": "主力製品",
+                "想定顧客数": 0.0,
+                "客単価": 0.0,
+                "購入頻度(月)": 1.0,
+                "メモ": "",
+                **{f"月{m:02d}": 0.0 for m in MONTH_SEQUENCE},
+            }
+        )
     df = pd.DataFrame(rows)
     return df
+
+
+def _industry_sales_dataframe(template_key: str) -> pd.DataFrame:
+    template = INDUSTRY_TEMPLATES.get(template_key)
+    if template is None:
+        return pd.DataFrame(
+            [
+                {
+                    "チャネル": "オンライン",
+                    "商品": "主力製品",
+                    "想定顧客数": 0.0,
+                    "客単価": 0.0,
+                    "購入頻度(月)": 1.0,
+                    "メモ": "",
+                    **{f"月{m:02d}": 0.0 for m in MONTH_SEQUENCE},
+                }
+            ]
+        )
+    rows: List[Dict[str, float | str]] = []
+    for sales_row in template.sales_rows:
+        pattern = sales_row.normalized_pattern()
+        base_monthly = sales_row.customers * sales_row.unit_price * sales_row.frequency
+        monthly_amounts = [float(base_monthly * weight) for weight in pattern]
+        row: Dict[str, float | str] = {
+            "チャネル": sales_row.channel,
+            "商品": sales_row.product,
+            "想定顧客数": float(sales_row.customers),
+            "客単価": float(sales_row.unit_price),
+            "購入頻度(月)": float(sales_row.frequency),
+            "メモ": sales_row.memo,
+        }
+        for idx, month in enumerate(MONTH_SEQUENCE):
+            row[f"月{month:02d}"] = monthly_amounts[idx]
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _apply_industry_template(template_key: str, unit_factor: Decimal) -> None:
+    template = INDUSTRY_TEMPLATES.get(template_key)
+    if template is None:
+        st.error("選択した業種テンプレートが見つかりません。")
+        return
+
+    df = _standardize_sales_df(_industry_sales_dataframe(template_key))
+    st.session_state[SALES_TEMPLATE_STATE_KEY] = df
+    st.session_state[SALES_CHANNEL_COUNTER_KEY] = len(df["チャネル"].unique()) + 1
+    st.session_state[SALES_PRODUCT_COUNTER_KEY] = len(df) + 1
+    st.session_state[INDUSTRY_TEMPLATE_KEY] = template_key
+
+    for code, ratio in template.variable_ratios.items():
+        st.session_state[f"var_ratio_{code}"] = float(ratio)
+    for code, amount in template.fixed_costs.items():
+        st.session_state[f"fixed_cost_{code}"] = float(
+            Decimal(str(amount)) / (unit_factor or Decimal("1"))
+        )
+    for code, amount in template.non_operating_income.items():
+        st.session_state[f"noi_{code}"] = float(
+            Decimal(str(amount)) / (unit_factor or Decimal("1"))
+        )
+    for code, amount in template.non_operating_expenses.items():
+        st.session_state[f"noe_{code}"] = float(
+            Decimal(str(amount)) / (unit_factor or Decimal("1"))
+        )
+
+    st.session_state["working_capital_profile"] = template.working_capital.copy()
+    metric_state: Dict[str, Dict[str, float]] = st.session_state.get(
+        "industry_custom_metrics", {}
+    )
+    metric_state[template_key] = template.custom_metrics
+    st.session_state["industry_custom_metrics"] = metric_state
+    st.toast(f"{template.label}のテンプレートを適用しました。", icon="🧩")
 
 
 def _capex_dataframe(data: Dict) -> pd.DataFrame:
@@ -642,11 +742,76 @@ if current_step == "context":
 elif current_step == "sales":
     st.header("STEP 2｜売上計画")
     st.markdown("顧客セグメントとチャネルの整理結果をもとに、チャネル×商品×月で売上を見積もります。")
-    st.info("例：オンライン販売 10万円、店舗販売 5万円など具体的な数字から積み上げると精度が高まります。季節性やプロモーション施策も織り込みましょう。")
+    st.info(
+        "例：オンライン販売 10万円、店舗販売 5万円など具体的な数字から積み上げると精度が高まります。"
+        "顧客数×客単価×購入頻度の分解を意識し、季節性やプロモーション施策も織り込みましょう。"
+    )
 
     main_col, guide_col = st.columns([4, 1], gap="large")
 
     with main_col:
+        st.markdown("#### 業種テンプレート & オプション")
+        template_options = ["—"] + list(INDUSTRY_TEMPLATES.keys())
+        stored_template_key = str(st.session_state.get(INDUSTRY_TEMPLATE_KEY, ""))
+        try:
+            default_index = template_options.index(stored_template_key if stored_template_key else "—")
+        except ValueError:
+            default_index = 0
+
+        template_cols = st.columns([2.5, 1.5])
+        with template_cols[0]:
+            selected_template_key = st.selectbox(
+                "業種テンプレート",
+                options=template_options,
+                index=default_index,
+                format_func=lambda key: (
+                    "— 業種を選択 —"
+                    if key == "—"
+                    else INDUSTRY_TEMPLATES[key].label
+                ),
+                help="Fermi推定に基づく標準客数・単価・原価率を自動設定します。",
+            )
+            if selected_template_key != "—":
+                template = INDUSTRY_TEMPLATES[selected_template_key]
+                st.caption(template.description)
+                with st.expander("テンプレートの前提を確認", expanded=False):
+                    st.markdown(
+                        "- 変動費率: "
+                        + "、".join(
+                            f"{code} {ratio:.1%}" for code, ratio in template.variable_ratios.items()
+                        )
+                    )
+                    st.markdown(
+                        "- 固定費 (月次換算): "
+                        + "、".join(
+                            f"{code} {format_amount_with_unit(Decimal(str(amount)) / Decimal('12'), '円')}"
+                            for code, amount in template.fixed_costs.items()
+                        )
+                    )
+                    st.markdown(
+                        "- 運転資本想定 (回転日数): 売掛 {receivable:.0f}日 / 棚卸 {inventory:.0f}日 / 買掛 {payable:.0f}日".format(
+                            receivable=template.working_capital.get("receivable_days", 45.0),
+                            inventory=template.working_capital.get("inventory_days", 30.0),
+                            payable=template.working_capital.get("payable_days", 25.0),
+                        )
+                    )
+                    if template.custom_metrics:
+                        st.markdown(
+                            "- 業種特有KPI候補: "
+                            + "、".join(template.custom_metrics.keys())
+                        )
+            else:
+                template = None
+        with template_cols[1]:
+            st.write("")
+            if st.button("業種テンプレートを適用", use_container_width=True, type="secondary"):
+                if selected_template_key == "—":
+                    st.warning("適用する業種を選択してください。")
+                else:
+                    _apply_industry_template(selected_template_key, unit_factor)
+        if selected_template_key != "—":
+            st.session_state[INDUSTRY_TEMPLATE_KEY] = selected_template_key
+
         control_cols = st.columns([1.2, 1.8, 1], gap="medium")
         with control_cols[0]:
             if st.button("チャネル追加", use_container_width=True, key="add_channel_button"):
@@ -655,6 +820,10 @@ elif current_step == "sales":
                 new_row = {
                     "チャネル": f"新チャネル{next_channel_idx}",
                     "商品": f"新商品{next_product_idx}",
+                    "想定顧客数": 0.0,
+                    "客単価": 0.0,
+                    "購入頻度(月)": 1.0,
+                    "メモ": "",
                     **{month: 0.0 for month in MONTH_COLUMNS},
                 }
                 st.session_state[SALES_CHANNEL_COUNTER_KEY] = next_channel_idx + 1
@@ -680,6 +849,10 @@ elif current_step == "sales":
                 new_row = {
                     "チャネル": target_channel,
                     "商品": f"新商品{next_product_idx}",
+                    "想定顧客数": 0.0,
+                    "客単価": 0.0,
+                    "購入頻度(月)": 1.0,
+                    "メモ": "",
                     **{month: 0.0 for month in MONTH_COLUMNS},
                 }
                 st.session_state[SALES_PRODUCT_COUNTER_KEY] = next_product_idx + 1
@@ -730,6 +903,22 @@ elif current_step == "sales":
                 column_config={
                     "チャネル": st.column_config.TextColumn("チャネル", max_chars=40, help="販売経路（例：自社EC、店舗など）"),
                     "商品": st.column_config.TextColumn("商品", max_chars=40, help="商品・サービス名を入力します。"),
+                    "想定顧客数": st.column_config.NumberColumn(
+                        "想定顧客数", min_value=0.0, step=1.0, format="%d", help="月間で想定する顧客数。Fermi推定の起点となります。"
+                    ),
+                    "客単価": st.column_config.NumberColumn(
+                        "客単価", min_value=0.0, step=100.0, format="¥%d", help="平均客単価。販促シナリオの前提になります。"
+                    ),
+                    "購入頻度(月)": st.column_config.NumberColumn(
+                        "購入頻度(月)",
+                        min_value=0.0,
+                        step=0.1,
+                        format="%.1f",
+                        help="1ヶ月あたりの購入・利用回数。サブスクの場合は1.0を基準にします。",
+                    ),
+                    "メモ": st.column_config.TextColumn(
+                        "メモ", max_chars=80, help="チャネル戦略や前提条件を記録します。"
+                    ),
                     **month_columns_config,
                 },
                 key="sales_editor",
@@ -747,6 +936,142 @@ elif current_step == "sales":
                     st.success("エディタの内容をテンプレートに反映しました。")
 
         sales_df = st.session_state[SALES_TEMPLATE_STATE_KEY]
+        with st.expander("外部データ連携・インポート", expanded=False):
+            st.markdown(
+                "会計ソフトやPOSから出力したCSV/Excelをアップロードすると、"
+                "月次の実績データを自動集計し、予実分析やテンプレート更新に利用できます。"
+            )
+            source_type = st.selectbox(
+                "データソース", ["会計ソフト", "POS", "銀行口座CSV", "その他"], key="external_source_type"
+            )
+            uploaded_external = st.file_uploader(
+                "CSV / Excelファイル", type=["csv", "xlsx"], key="external_import_file"
+            )
+            external_df: pd.DataFrame | None = None
+            if uploaded_external is not None:
+                try:
+                    if uploaded_external.name.lower().endswith(".xlsx"):
+                        external_df = pd.read_excel(uploaded_external)
+                    else:
+                        external_df = pd.read_csv(uploaded_external)
+                except Exception:
+                    external_df = None
+                    st.error("ファイルの読み込みに失敗しました。列構成を確認してください。")
+
+            if external_df is not None and not external_df.empty:
+                st.dataframe(external_df.head(20), use_container_width=True, hide_index=True)
+                columns = list(external_df.columns)
+                date_col = st.selectbox("日付列", columns, key="external_date_col")
+                amount_col = st.selectbox("金額列", columns, key="external_amount_col")
+                category_options = ["指定しない", *columns]
+                category_col = st.selectbox(
+                    "区分列 (任意)", category_options, index=0, key="external_category_col"
+                )
+                target_metric = st.selectbox(
+                    "取り込み先", ["売上", "変動費", "固定費"], key="external_target_metric"
+                )
+
+                working_df = external_df[[date_col, amount_col]].copy()
+                working_df["__date"] = pd.to_datetime(working_df[date_col], errors="coerce")
+                working_df["__amount"] = pd.to_numeric(working_df[amount_col], errors="coerce")
+                if category_col != "指定しない":
+                    working_df["__category"] = external_df[category_col].astype(str)
+                    categories = (
+                        working_df["__category"].dropna().unique().tolist()
+                        if not working_df["__category"].dropna().empty
+                        else []
+                    )
+                    selected_categories = st.multiselect(
+                        "対象カテゴリ", categories, default=categories, key="external_category_filter"
+                    )
+                    if selected_categories:
+                        working_df = working_df[working_df["__category"].isin(selected_categories)]
+                else:
+                    selected_categories = None
+
+                working_df = working_df.dropna(subset=["__date", "__amount"])
+                if working_df.empty:
+                    st.warning("有効な日付と金額の行が見つかりませんでした。")
+                else:
+                    working_df["__month"] = working_df["__date"].dt.month
+                    monthly_totals = working_df.groupby("__month")["__amount"].sum()
+                    monthly_map = {
+                        month: float(monthly_totals.get(month, 0.0)) for month in MONTH_SEQUENCE
+                    }
+                    monthly_table = pd.DataFrame(
+                        {
+                            "月": [f"{month}月" for month in MONTH_SEQUENCE],
+                            "金額": [monthly_map[month] for month in MONTH_SEQUENCE],
+                        }
+                    )
+                    st.dataframe(monthly_table, use_container_width=True, hide_index=True)
+                    total_amount = float(sum(monthly_map.values()))
+                    st.metric("年間合計", format_amount_with_unit(Decimal(str(total_amount)), "円"))
+
+                    apply_to_plan = False
+                    selected_fixed_code: str | None = None
+                    if target_metric == "固定費":
+                        apply_to_plan = st.checkbox(
+                            "平均月額を固定費に反映する", value=True, key="external_apply_fixed"
+                        )
+                        fixed_options = [code for code, _, _ in FIXED_COST_FIELDS]
+                        selected_fixed_code = st.selectbox(
+                            "反映先の固定費項目",
+                            fixed_options,
+                            format_func=lambda code: next(
+                                label for code_, label, _ in FIXED_COST_FIELDS if code_ == code
+                            ),
+                            key="external_fixed_code",
+                        )
+                    elif target_metric == "売上":
+                        apply_to_plan = st.checkbox(
+                            "テンプレートに売上行を追加", value=False, key="external_apply_sales"
+                        )
+                    else:
+                        st.caption("変動費は実績データとして保存し、分析ページで原価率を確認します。")
+
+                    if st.button("実績データを保存", key="external_import_apply"):
+                        actual_key_map = {
+                            "売上": "sales",
+                            "変動費": "variable_costs",
+                            "固定費": "fixed_costs",
+                        }
+                        actuals_state = st.session_state.get("external_actuals", {})
+                        actuals_state[actual_key_map[target_metric]] = {
+                            "monthly": monthly_map,
+                            "source": source_type,
+                            "file_name": getattr(uploaded_external, "name", ""),
+                            "category": selected_categories,
+                            "total": total_amount,
+                        }
+                        st.session_state["external_actuals"] = actuals_state
+
+                        if apply_to_plan and target_metric == "売上":
+                            new_row = {
+                                "チャネル": f"{source_type}連携",
+                                "商品": "外部実績",
+                                "想定顧客数": 0.0,
+                                "客単価": 0.0,
+                                "購入頻度(月)": 1.0,
+                                "メモ": "外部実績データ",
+                                **{f"月{month:02d}": monthly_map[month] for month in MONTH_COLUMNS},
+                            }
+                            updated = pd.concat(
+                                [st.session_state[SALES_TEMPLATE_STATE_KEY], pd.DataFrame([new_row])],
+                                ignore_index=True,
+                            )
+                            st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(updated)
+                            st.toast("外部データを売上テンプレートに追加しました。", icon="📥")
+                        if apply_to_plan and target_metric == "固定費" and selected_fixed_code:
+                            monthly_average = Decimal(str(total_amount)) / Decimal(len(MONTH_SEQUENCE))
+                            st.session_state[f"fixed_cost_{selected_fixed_code}"] = float(
+                                monthly_average / (unit_factor or Decimal("1"))
+                            )
+                            st.toast("固定費を実績平均で更新しました。", icon="💰")
+                        st.success("実績データを保存しました。分析ページで予実差異が表示されます。")
+            elif uploaded_external is not None:
+                st.warning("読み込めるデータがありません。サンプル行を確認してください。")
+
         if any(err.field.startswith("sales") for err in validation_errors):
             messages = "<br/>".join(
                 err.message for err in validation_errors if err.field.startswith("sales")
@@ -1008,11 +1333,19 @@ elif current_step == "tax":
             sales_data = {"items": []}
             for _, row in sales_df.fillna(0).iterrows():
                 monthly_amounts = [Decimal(str(row[month])) for month in MONTH_COLUMNS]
+                customers_val = Decimal(str(row.get("想定顧客数", 0)))
+                unit_price_val = Decimal(str(row.get("客単価", 0)))
+                frequency_val = Decimal(str(row.get("購入頻度(月)", 0)))
+                memo_val = str(row.get("メモ", "")).strip()
                 sales_data["items"].append(
                     {
                         "channel": str(row.get("チャネル", "")).strip() or "未設定",
                         "product": str(row.get("商品", "")).strip() or "未設定",
                         "monthly": {"amounts": monthly_amounts},
+                        "customers": customers_val if customers_val > 0 else None,
+                        "unit_price": unit_price_val if unit_price_val > 0 else None,
+                        "purchase_frequency": frequency_val if frequency_val > 0 else None,
+                        "memo": memo_val or None,
                     }
                 )
 
