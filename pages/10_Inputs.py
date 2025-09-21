@@ -22,6 +22,7 @@ from models import (
 from state import ensure_session_defaults
 from theme import inject_theme
 from validators import ValidationIssue, validate_bundle
+from ui.streamlit_compat import use_container_width_kwargs
 
 st.set_page_config(
     page_title="経営計画スタジオ｜Inputs",
@@ -562,7 +563,7 @@ def _render_navigation(step_index: int) -> None:
         if prev_step_id is not None:
             st.button(
                 "← 戻る",
-                use_container_width=True,
+                **use_container_width_kwargs(st.button),
                 on_click=_set_wizard_step,
                 args=(prev_step_id,),
                 key=f"prev_{step_index}",
@@ -573,7 +574,7 @@ def _render_navigation(step_index: int) -> None:
         if next_step_id is not None:
             st.button(
                 "次へ →",
-                use_container_width=True,
+                **use_container_width_kwargs(st.button),
                 type="primary",
                 on_click=_set_wizard_step,
                 args=(next_step_id,),
@@ -804,7 +805,11 @@ elif current_step == "sales":
                 template = None
         with template_cols[1]:
             st.write("")
-            if st.button("業種テンプレートを適用", use_container_width=True, type="secondary"):
+            if st.button(
+                "業種テンプレートを適用",
+                type="secondary",
+                **use_container_width_kwargs(st.button),
+            ):
                 if selected_template_key == "—":
                     st.warning("適用する業種を選択してください。")
                 else:
@@ -814,7 +819,11 @@ elif current_step == "sales":
 
         control_cols = st.columns([1.2, 1.8, 1], gap="medium")
         with control_cols[0]:
-            if st.button("チャネル追加", use_container_width=True, key="add_channel_button"):
+            if st.button(
+                "チャネル追加",
+                key="add_channel_button",
+                **use_container_width_kwargs(st.button),
+            ):
                 next_channel_idx = int(st.session_state.get(SALES_CHANNEL_COUNTER_KEY, 1))
                 next_product_idx = int(st.session_state.get(SALES_PRODUCT_COUNTER_KEY, 1))
                 new_row = {
@@ -843,7 +852,11 @@ elif current_step == "sales":
                 help="商品を追加するチャネルを選択します。",
             )
         with control_cols[2]:
-            if st.button("商品追加", use_container_width=True, key="add_product_button"):
+            if st.button(
+                "商品追加",
+                key="add_product_button",
+                **use_container_width_kwargs(st.button),
+            ):
                 next_product_idx = int(st.session_state.get(SALES_PRODUCT_COUNTER_KEY, 1))
                 target_channel = selected_channel or channel_options[0]
                 new_row = {
@@ -879,7 +892,7 @@ elif current_step == "sales":
                     data=_sales_template_to_csv(sales_df),
                     file_name="sales_template.csv",
                     mime="text/csv",
-                    use_container_width=True,
+                    **use_container_width_kwargs(st.download_button),
                 )
             with download_cols[1]:
                 st.download_button(
@@ -887,7 +900,7 @@ elif current_step == "sales":
                     data=_sales_template_to_excel(sales_df),
                     file_name="sales_template.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
+                    **use_container_width_kwargs(st.download_button),
                 )
             uploaded_template = st.file_uploader(
                 "テンプレートをアップロード (最大5MB)",
@@ -898,7 +911,7 @@ elif current_step == "sales":
             edited_df = st.data_editor(
                 sales_df,
                 num_rows="dynamic",
-                use_container_width=True,
+                **use_container_width_kwargs(st.data_editor),
                 hide_index=True,
                 column_config={
                     "チャネル": st.column_config.TextColumn("チャネル", max_chars=40, help="販売経路（例：自社EC、店舗など）"),
@@ -923,17 +936,25 @@ elif current_step == "sales":
                 },
                 key="sales_editor",
             )
-            if st.form_submit_button("テンプレートを反映", use_container_width=True):
-                if uploaded_template is not None:
-                    loaded_df = _load_sales_template_from_upload(uploaded_template)
-                    if loaded_df is not None:
-                        st.session_state[SALES_TEMPLATE_STATE_KEY] = loaded_df
-                        st.success("アップロードしたテンプレートを適用しました。")
-                else:
-                    st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(
-                        pd.DataFrame(edited_df)
+            submit_kwargs = use_container_width_kwargs(st.form_submit_button)
+            if st.form_submit_button("テンプレートを反映", **submit_kwargs):
+                try:
+                    with st.spinner("テンプレートを反映しています..."):
+                        if uploaded_template is not None:
+                            loaded_df = _load_sales_template_from_upload(uploaded_template)
+                            if loaded_df is not None:
+                                st.session_state[SALES_TEMPLATE_STATE_KEY] = loaded_df
+                                st.success("アップロードしたテンプレートを適用しました。")
+                        else:
+                            st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(
+                                pd.DataFrame(edited_df)
+                            )
+                            st.success("エディタの内容をテンプレートに反映しました。")
+                except Exception:
+                    st.error(
+                        "テンプレートの反映に失敗しました。列構成や数値を確認し、"
+                        "解決しない場合は support@keieiplan.jp までお問い合わせください。"
                     )
-                    st.success("エディタの内容をテンプレートに反映しました。")
 
         sales_df = st.session_state[SALES_TEMPLATE_STATE_KEY]
         with st.expander("外部データ連携・インポート", expanded=False):
@@ -959,7 +980,11 @@ elif current_step == "sales":
                     st.error("ファイルの読み込みに失敗しました。列構成を確認してください。")
 
             if external_df is not None and not external_df.empty:
-                st.dataframe(external_df.head(20), use_container_width=True, hide_index=True)
+                st.dataframe(
+                    external_df.head(20),
+                    hide_index=True,
+                    **use_container_width_kwargs(st.dataframe),
+                )
                 columns = list(external_df.columns)
                 date_col = st.selectbox("日付列", columns, key="external_date_col")
                 amount_col = st.selectbox("金額列", columns, key="external_amount_col")
@@ -1004,7 +1029,11 @@ elif current_step == "sales":
                             "金額": [monthly_map[month] for month in MONTH_SEQUENCE],
                         }
                     )
-                    st.dataframe(monthly_table, use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        monthly_table,
+                        hide_index=True,
+                        **use_container_width_kwargs(st.dataframe),
+                    )
                     total_amount = float(sum(monthly_map.values()))
                     st.metric("年間合計", format_amount_with_unit(Decimal(str(total_amount)), "円"))
 
@@ -1160,7 +1189,7 @@ elif current_step == "invest":
     capex_editor_df = st.data_editor(
         current_capex_df,
         num_rows="dynamic",
-        use_container_width=True,
+        **use_container_width_kwargs(st.data_editor),
         hide_index=True,
         column_config={
             "投資名": st.column_config.TextColumn("投資名", help="投資対象の名称を入力します。"),
@@ -1196,7 +1225,7 @@ elif current_step == "invest":
     loan_editor_df = st.data_editor(
         current_loan_df,
         num_rows="dynamic",
-        use_container_width=True,
+        **use_container_width_kwargs(st.data_editor),
         hide_index=True,
         column_config={
             "名称": st.column_config.TextColumn("名称", help="借入の名称（例：メインバンク、リースなど）。"),
@@ -1326,7 +1355,11 @@ elif current_step == "tax":
 
     save_col, _ = st.columns([2, 1])
     with save_col:
-        if st.button("入力を検証して保存", type="primary", use_container_width=True):
+        if st.button(
+            "入力を検証して保存",
+            type="primary",
+            **use_container_width_kwargs(st.button),
+        ):
             sales_df = _standardize_sales_df(pd.DataFrame(st.session_state[SALES_TEMPLATE_STATE_KEY]))
             st.session_state[SALES_TEMPLATE_STATE_KEY] = sales_df
 

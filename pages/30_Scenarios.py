@@ -16,6 +16,7 @@ from formatting import format_amount_with_unit, format_delta
 from models import CapexPlan, LoanSchedule, TaxPolicy
 from state import ensure_session_defaults, load_finance_bundle
 from theme import inject_theme
+from ui.streamlit_compat import use_container_width_kwargs
 
 st.set_page_config(
     page_title="経営計画スタジオ｜Scenarios",
@@ -771,7 +772,7 @@ with scenario_tab:
     st.dataframe(
         result_table,
         hide_index=True,
-        use_container_width=True,
+        **use_container_width_kwargs(st.dataframe),
     )
     if flagged_labels:
         st.warning("リスク閾値を下回るシナリオ: " + ", ".join(flagged_labels))
@@ -1010,7 +1011,11 @@ with sensitivity_tab:
         multi_df = pd.DataFrame(combinations)
         if not multi_df.empty:
             display_df = multi_df.drop(columns=["raw_value", "raw_diff", "axis_format"], errors="ignore")
-            st.dataframe(display_df, hide_index=True, use_container_width=True)
+            st.dataframe(
+                display_df,
+                hide_index=True,
+                **use_container_width_kwargs(st.dataframe),
+            )
             axis_format = multi_df["axis_format"].iloc[0] if "axis_format" in multi_df else "~s"
             sorted_cases = multi_df.sort_values("raw_value")
             order = sorted_cases["ケース"].tolist()
