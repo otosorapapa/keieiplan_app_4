@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Dict, List
@@ -20,7 +21,10 @@ from models import (
     MONTH_SEQUENCE,
 )
 from state import ensure_session_defaults
+from services import auth
+from services.auth import AuthError
 from theme import inject_theme
+from ui.components import render_callout
 from validators import ValidationIssue, validate_bundle
 from ui.streamlit_compat import use_container_width_kwargs
 
@@ -113,6 +117,69 @@ BUSINESS_CONTEXT_PLACEHOLDER = {
     "bmc_channels": "顧客に価値を届けるチャネル (例：ECサイト、代理店、直販営業)",
     "qualitative_memo": "事業計画書に記載したい補足・KGI/KPIの背景",
 }
+
+
+def _build_snapshot_payload() -> Dict[str, object]:
+    """Collect the current session state into a serialisable snapshot."""
+
+    snapshot: Dict[str, object] = {
+        "finance_raw": st.session_state.get("finance_raw", {}),
+        "finance_settings": st.session_state.get("finance_settings", {}),
+        "scenarios": st.session_state.get("scenarios", []),
+        "working_capital_profile": st.session_state.get("working_capital_profile", {}),
+        "what_if_scenarios": st.session_state.get("what_if_scenarios", {}),
+        "business_context": st.session_state.get(BUSINESS_CONTEXT_KEY, {}),
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+    scenario_df_state = st.session_state.get("scenario_df")
+    if isinstance(scenario_df_state, pd.DataFrame):
+        snapshot["scenario_df"] = scenario_df_state.to_dict(orient="records")
+    elif scenario_df_state is not None:
+        snapshot["scenario_df"] = scenario_df_state
+    return snapshot
+
+
+def _hydrate_snapshot(snapshot: Dict[str, object]) -> bool:
+    """Load a snapshot dictionary back into Streamlit session state."""
+
+    finance_raw_data = snapshot.get("finance_raw")
+    if not isinstance(finance_raw_data, dict):
+        st.error("保存データの形式が正しくありません。")
+        return False
+    bundle, issues = validate_bundle(finance_raw_data)
+    if issues:
+        st.session_state["finance_validation_errors"] = issues
+        st.error("保存データの検証に失敗しました。入力項目をご確認ください。")
+        return False
+    st.session_state["finance_raw"] = finance_raw_data
+    st.session_state["finance_models"] = {
+        "sales": bundle.sales,
+        "costs": bundle.costs,
+        "capex": bundle.capex,
+        "loans": bundle.loans,
+        "tax": bundle.tax,
+    }
+    st.session_state["finance_validation_errors"] = []
+    if "finance_settings" in snapshot and isinstance(snapshot["finance_settings"], dict):
+        st.session_state["finance_settings"] = snapshot["finance_settings"]
+    if "working_capital_profile" in snapshot and isinstance(snapshot["working_capital_profile"], dict):
+        st.session_state["working_capital_profile"] = snapshot["working_capital_profile"]
+    if "scenarios" in snapshot and isinstance(snapshot["scenarios"], list):
+        st.session_state["scenarios"] = snapshot["scenarios"]
+    scenario_df_state = snapshot.get("scenario_df")
+    if isinstance(scenario_df_state, list):
+        st.session_state["scenario_df"] = pd.DataFrame(scenario_df_state)
+    elif isinstance(scenario_df_state, dict):
+        st.session_state["scenario_df"] = pd.DataFrame(scenario_df_state)
+    if "business_context" in snapshot and isinstance(snapshot["business_context"], dict):
+        st.session_state[BUSINESS_CONTEXT_KEY] = snapshot["business_context"]
+    return True
+
+
+def _format_timestamp(value: object) -> str:
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M")
+    return str(value)
 
 VARIABLE_RATIO_FIELDS = [
     (
@@ -1485,6 +1552,111 @@ elif current_step == "tax":
                     "tax": bundle.tax,
                 }
                 st.toast("財務データを保存しました。", icon="✅")
+
+    st.divider()
+    st.subheader("クラウド保存とバージョン管理")
+
+    if not auth.is_authenticated():
+        render_callout(
+            icon="🔐",
+            title="アカウントにログインするとクラウド保存できます",
+            body="ヘッダー右上のログインからアカウントを作成し、計画をクラウドに保存してバージョン管理しましょう。",
+            tone="caution",
+        )
+    else:
+        plan_summaries = auth.available_plan_summaries()
+        save_col, load_col = st.columns(2)
+        with save_col:
+            st.markdown("#### クラウドに保存")
+            plan_name = st.text_input(
+                "保存する計画名称",
+                value=st.session_state.get("plan_save_name", "メイン計画"),
+                key="plan_save_name",
+                placeholder="例：政策公庫提出用2025",
+            )
+            plan_note = st.text_input(
+                "バージョンメモ (任意)",
+                key="plan_save_note",
+                placeholder="例：販促強化シナリオ",
+            )
+            if st.button("クラウドに保存", key="plan_snapshot_save", type="primary"):
+                if not plan_name.strip():
+                    st.error("計画名称を入力してください。")
+                else:
+                    try:
+                        payload = _build_snapshot_payload()
+                        summary = auth.save_snapshot(
+                            plan_name=plan_name.strip(),
+                            payload=payload,
+                            note=plan_note.strip(),
+                            description="inputs_page_snapshot",
+                        )
+                        st.success(
+                            f"{summary.plan_name} をバージョン v{summary.version} として保存しました。",
+                            icon="✅",
+                        )
+                        st.session_state["plan_save_note"] = ""
+                    except AuthError as exc:
+                        st.error(str(exc))
+        with load_col:
+            st.markdown("#### 保存済みから復元")
+            if not plan_summaries:
+                st.info("まだ保存済みの計画がありません。保存するとここから復元できます。")
+            else:
+                plan_labels = {
+                    f"{summary.name} (最新v{summary.latest_version})": summary
+                    for summary in plan_summaries
+                }
+                selected_plan_label = st.selectbox(
+                    "計画を選択",
+                    list(plan_labels.keys()),
+                    key="plan_load_plan",
+                )
+                selected_plan = plan_labels[selected_plan_label]
+                versions = auth.available_versions(selected_plan.plan_id)
+                if versions:
+                    version_labels = {
+                        f"v{ver.version}｜{_format_timestamp(ver.created_at)}｜{ver.note or 'メモなし'}": ver
+                        for ver in versions
+                    }
+                    selected_version_label = st.selectbox(
+                        "バージョンを選択",
+                        list(version_labels.keys()),
+                        key="plan_load_version",
+                    )
+                    selected_version = version_labels[selected_version_label]
+                    if st.button("このバージョンを読み込む", key="plan_snapshot_load"):
+                        payload = auth.load_snapshot(
+                            plan_id=selected_plan.plan_id,
+                            version_id=selected_version.id,
+                        )
+                        if payload is None:
+                            st.error("選択したバージョンを読み込めませんでした。")
+                        elif _hydrate_snapshot(payload):
+                            st.toast(
+                                f"{selected_plan.name} v{selected_version.version} を読み込みました。",
+                                icon="✅",
+                            )
+                            st.experimental_rerun()
+                else:
+                    st.info("選択した計画にはバージョンがまだありません。")
+
+        if plan_summaries:
+            summary_df = pd.DataFrame(
+                [
+                    {
+                        "計画名": summary.name,
+                        "最新バージョン": summary.latest_version,
+                        "最終更新": _format_timestamp(summary.updated_at),
+                    }
+                    for summary in plan_summaries
+                ]
+            )
+            st.dataframe(
+                summary_df,
+                hide_index=True,
+                use_container_width=True,
+            )
 
 st.session_state[BUSINESS_CONTEXT_KEY] = context_state
 _render_navigation(step_index)

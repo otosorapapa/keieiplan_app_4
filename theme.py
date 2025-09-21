@@ -1,9 +1,11 @@
-"""Centralised colour scheme and style helpers."""
+"""Centralised colour scheme, responsive layout tweaks and accessibility helpers."""
 from __future__ import annotations
 
 from typing import Dict
 
 import streamlit as st
+
+from services.security import enforce_https
 
 THEME_COLORS: Dict[str, str] = {
     "background": "#F7F9FB",
@@ -12,35 +14,65 @@ THEME_COLORS: Dict[str, str] = {
     "primary": "#1F4E79",
     "primary_light": "#4F83B3",
     "accent": "#F2C57C",
-    "positive": "#70A9A1",
-    "positive_strong": "#2B7A78",
-    "negative": "#F28F8F",
-    "neutral": "#C2D3E5",
-    "text": "#203040",
-    "text_subtle": "#596B7A",
+    "positive": "#3A7D44",
+    "positive_strong": "#14532D",
+    "negative": "#C2410C",
+    "neutral": "#CBD5F5",
+    "text": "#1F2A37",
+    "text_subtle": "#4B5563",
+    "chart_blue": "#1f77b4",
+    "chart_orange": "#ff7f0e",
+    "chart_green": "#2ca02c",
+    "chart_purple": "#9467bd",
 }
 
-CUSTOM_STYLE = f"""
+HIGH_CONTRAST_COLORS: Dict[str, str] = {
+    "background": "#0F172A",
+    "surface": "#111827",
+    "surface_alt": "#1F2937",
+    "primary": "#F97316",
+    "primary_light": "#FB923C",
+    "accent": "#FACC15",
+    "positive": "#22C55E",
+    "positive_strong": "#16A34A",
+    "negative": "#F87171",
+    "neutral": "#94A3B8",
+    "text": "#F9FAFB",
+    "text_subtle": "#E2E8F0",
+    "chart_blue": "#60A5FA",
+    "chart_orange": "#FDBA74",
+    "chart_green": "#86EFAC",
+    "chart_purple": "#C4B5FD",
+}
+
+CUSTOM_STYLE_TEMPLATE = """
 <style>
 :root {{
-    --base-bg: {THEME_COLORS["background"]};
-    --surface: {THEME_COLORS["surface"]};
-    --surface-alt: {THEME_COLORS["surface_alt"]};
-    --primary: {THEME_COLORS["primary"]};
-    --primary-light: {THEME_COLORS["primary_light"]};
-    --accent: {THEME_COLORS["accent"]};
-    --positive: {THEME_COLORS["positive"]};
-    --positive-strong: {THEME_COLORS["positive_strong"]};
-    --negative: {THEME_COLORS["negative"]};
-    --neutral: {THEME_COLORS["neutral"]};
-    --text-color: {THEME_COLORS["text"]};
-    --text-subtle: {THEME_COLORS["text_subtle"]};
+    --base-font-scale: {font_scale};
+    --base-bg: {background};
+    --surface: {surface};
+    --surface-alt: {surface_alt};
+    --primary: {primary};
+    --primary-light: {primary_light};
+    --accent: {accent};
+    --positive: {positive};
+    --positive-strong: {positive_strong};
+    --negative: {negative};
+    --neutral: {neutral};
+    --text-color: {text};
+    --text-subtle: {text_subtle};
+    --chart-blue: {chart_blue};
+    --chart-orange: {chart_orange};
+    --chart-green: {chart_green};
+    --chart-purple: {chart_purple};
 }}
 
 html, body, [data-testid="stAppViewContainer"] {{
     background-color: var(--base-bg);
     color: var(--text-color);
     font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
+    font-size: calc(16px * var(--base-font-scale));
+    line-height: 1.6;
 }}
 
 [data-testid="stSidebar"] {{
@@ -52,14 +84,27 @@ html, body, [data-testid="stAppViewContainer"] {{
     color: #F7FAFC !important;
 }}
 
+[data-testid="stSidebar"] button:focus-visible,
+button:focus-visible {{
+    outline: 3px solid var(--accent) !important;
+    outline-offset: 2px;
+}}
+
+[data-testid="stAppViewContainer"] a {{
+    color: var(--primary);
+    text-decoration: underline;
+    text-decoration-thickness: 0.12em;
+}}
+
 .stTabs [role="tablist"] {{
     gap: 0.4rem;
     border-bottom: 1px solid var(--neutral);
+    flex-wrap: wrap;
 }}
 
 .stTabs [role="tab"] {{
     font-weight: 600;
-    padding: 0.85rem 1.4rem;
+    padding: 0.75rem 1.2rem;
     border-radius: 14px 14px 0 0;
     background-color: transparent;
     color: var(--text-subtle);
@@ -72,29 +117,174 @@ html, body, [data-testid="stAppViewContainer"] {{
     border-bottom: 3px solid var(--accent);
 }}
 
-div[data-testid="stMetric"] {{
-    background: linear-gradient(135deg, var(--surface) 0%, var(--surface-alt) 100%);
-    border-radius: 18px;
-    padding: 1.15rem 1.3rem;
-    box-shadow: 0 14px 28px rgba(31, 78, 121, 0.08);
-    backdrop-filter: blur(6px);
+.hero-card {{
+    background: linear-gradient(135deg, rgba(93, 169, 233, 0.92) 0%, rgba(112, 169, 161, 0.92) 100%);
+    color: #ffffff;
+    padding: 2.2rem 2.8rem;
+    border-radius: 26px;
+    box-shadow: 0 24px 48px rgba(22, 60, 90, 0.25);
+    margin-bottom: 1.5rem;
 }}
 
-div[data-testid="stMetric"] [data-testid="stMetricLabel"] {{
-    font-size: 0.92rem;
-    color: var(--text-subtle);
-}}
-
-div[data-testid="stMetric"] [data-testid="stMetricValue"] {{
-    color: var(--primary);
+.hero-card h1 {{
+    margin: 0 0 0.6rem 0;
+    font-size: calc(2.1rem * var(--base-font-scale));
     font-weight: 700;
 }}
 
-div[data-testid="stMetric"] [data-testid="stMetricDelta"] {{
-    color: var(--accent) !important;
+.hero-card p {{
+    margin: 0;
+    font-size: calc(1.02rem * var(--base-font-scale));
+    opacity: 0.92;
 }}
 
-div[data-testid="stDataFrame"] {{
+.responsive-card-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1rem;
+    width: 100%;
+}}
+
+.metric-card {{
+    background: linear-gradient(145deg, var(--surface) 0%, var(--surface-alt) 100%);
+    border-radius: 20px;
+    padding: 1.2rem 1.4rem;
+    box-shadow: 0 18px 28px rgba(31, 78, 121, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}}
+
+.metric-card--positive {{
+    border: 2px solid var(--positive);
+}}
+
+.metric-card--caution {{
+    border: 2px solid var(--accent);
+}}
+
+.metric-card--negative {{
+    border: 2px solid var(--negative);
+}}
+
+.metric-card__header {{
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: calc(0.95rem * var(--base-font-scale));
+    color: var(--text-subtle);
+}}
+
+.metric-card__icon {{
+    font-size: 1.3rem;
+}}
+
+.metric-card__label {{
+    font-weight: 600;
+}}
+
+.metric-card__trend {{
+    margin-left: auto;
+    font-size: calc(0.82rem * var(--base-font-scale));
+    font-weight: 600;
+}}
+
+.metric-card__tone-badge {{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: 0.5rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    background: rgba(31, 78, 121, 0.12);
+    font-size: calc(0.75rem * var(--base-font-scale));
+}}
+.metric-card__tone-text {{
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}}
+.metric-card__value {{
+    font-size: calc(1.5rem * var(--base-font-scale));
+    font-weight: 700;
+    color: var(--primary);
+    margin: 0;
+}}
+
+.metric-card__description {{
+    margin: 0;
+    font-size: calc(0.9rem * var(--base-font-scale));
+    color: var(--text-subtle);
+}}
+
+.metric-card__footnote {{
+    margin: 0;
+    font-size: calc(0.8rem * var(--base-font-scale));
+    color: var(--text-subtle);
+}}
+
+.callout {{
+    display: flex;
+    gap: 0.8rem;
+    padding: 1rem 1.1rem;
+    border-radius: 16px;
+    margin-bottom: 1rem;
+    background-color: var(--surface);
+    border-left: 6px solid var(--primary);
+    box-shadow: 0 12px 18px rgba(31, 78, 121, 0.08);
+}}
+
+.callout--positive {{
+    border-left-color: var(--positive);
+}}
+
+.callout--caution {{
+    border-left-color: var(--accent);
+}}
+
+.callout__icon {{
+    font-size: 1.5rem;
+}}
+
+.callout__title {{
+    font-size: calc(1rem * var(--base-font-scale));
+    color: var(--primary);
+}}
+
+.callout__body p {{
+    margin: 0;
+    font-size: calc(0.92rem * var(--base-font-scale));
+}}
+
+.visually-hidden {{
+    position: absolute !important;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}}
+[data-testid="stMetric"] {{
+    background: linear-gradient(135deg, var(--surface) 0%, var(--surface-alt) 100%);
+    border-radius: 18px;
+    padding: 1rem 1.2rem;
+    box-shadow: 0 14px 28px rgba(31, 78, 121, 0.08);
+}}
+
+[data-testid="stMetric"] [data-testid="stMetricLabel"] {{
+    font-size: calc(0.92rem * var(--base-font-scale));
+    color: var(--text-subtle);
+}}
+
+[data-testid="stMetric"] [data-testid="stMetricValue"] {{
+    color: var(--primary);
+    font-weight: 700;
+    font-size: calc(1.35rem * var(--base-font-scale));
+}}
+
+[data-testid="stDataFrame"] {{
     background-color: var(--surface);
     border-radius: 18px;
     padding: 0.6rem 0.8rem 0.9rem 0.8rem;
@@ -112,94 +302,73 @@ button[kind="primary"]:hover {{
     background-color: var(--primary-light);
 }}
 
-.hero-card {{
-    background: linear-gradient(135deg, rgba(93, 169, 233, 0.92) 0%, rgba(112, 169, 161, 0.92) 100%);
-    color: #ffffff;
-    padding: 2.2rem 2.8rem;
-    border-radius: 26px;
-    box-shadow: 0 24px 48px rgba(22, 60, 90, 0.25);
-    margin-bottom: 1.5rem;
-}}
-
-.hero-card h1 {{
-    margin: 0 0 0.6rem 0;
-    font-size: 2.35rem;
-    font-weight: 700;
-}}
-
-.hero-card p {{
-    margin: 0;
-    font-size: 1.08rem;
-    opacity: 0.92;
-}}
-
-.insight-card {{
-    background-color: var(--surface);
-    border-radius: 18px;
-    padding: 1.1rem 1.3rem;
-    box-shadow: 0 12px 24px rgba(31, 78, 121, 0.08);
-    border-left: 6px solid var(--primary-light);
-    margin-bottom: 1rem;
-}}
-
-.insight-card.positive {{
-    border-left-color: var(--positive);
-}}
-
-.insight-card.warning {{
-    border-left-color: var(--accent);
-}}
-
-.insight-card.alert {{
-    border-left-color: var(--negative);
-}}
-
-.insight-card h4 {{
-    margin: 0 0 0.4rem 0;
-    font-size: 1.05rem;
-    color: var(--primary);
-}}
-
-.insight-card p {{
-    margin: 0;
-    font-size: 0.95rem;
-    color: var(--text-subtle);
-    line-height: 1.55;
-}}
-
-.anomaly-table caption {{
-    caption-side: top;
-    font-weight: 600;
-    color: var(--primary);
-}}
-
-.ai-badge {{
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    background-color: rgba(112, 169, 161, 0.16);
-    color: var(--positive-strong);
-    border-radius: 999px;
-    padding: 0.35rem 0.9rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
+button[kind="primary"]:focus-visible {{
+    outline: 3px solid var(--accent) !important;
+    outline-offset: 2px;
 }}
 
 .field-error {{
-    border: 1px solid {THEME_COLORS["negative"]};
+    border: 1px solid var(--negative);
     border-radius: 12px;
     padding: 0.8rem;
-    background-color: rgba(242, 143, 143, 0.12);
-    color: {THEME_COLORS["negative"]};
+    background-color: rgba(248, 113, 113, 0.15);
+    color: var(--negative);
+}}
+
+@media (max-width: 980px) {{
+    .hero-card {{
+        padding: 1.6rem 1.8rem;
+    }}
+    .responsive-card-grid {{
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    }}
+}}
+
+@media (max-width: 640px) {{
+    .hero-card h1 {{
+        font-size: calc(1.6rem * var(--base-font-scale));
+    }}
+    .hero-card p {{
+        font-size: calc(0.95rem * var(--base-font-scale));
+    }}
+    .stTabs [role="tab"] {{
+        padding: 0.6rem 0.9rem;
+    }}
+}}
+
+@media (prefers-reduced-motion: reduce) {{
+    *, *::before, *::after {{
+        transition-duration: 0.001ms !important;
+        animation-duration: 0.001ms !important;
+    }}
 }}
 </style>
 """
 
 
+def _clamp_font_scale(value: float) -> float:
+    return max(0.85, min(1.4, value))
+
+
+def _resolve_palette(high_contrast: bool) -> Dict[str, str]:
+    return HIGH_CONTRAST_COLORS if high_contrast else THEME_COLORS
+
+
+def build_custom_style(*, font_scale: float = 1.0, high_contrast: bool = False) -> str:
+    palette = _resolve_palette(high_contrast)
+    return CUSTOM_STYLE_TEMPLATE.format(
+        font_scale=f"{_clamp_font_scale(font_scale):.2f}",
+        **palette,
+    )
+
+
 def inject_theme() -> None:
     """Apply the shared CSS theme to the current page."""
 
-    st.markdown(CUSTOM_STYLE, unsafe_allow_html=True)
+    font_scale = float(st.session_state.get("ui_font_scale", 1.0))
+    high_contrast = bool(st.session_state.get("ui_high_contrast", False))
+    st.markdown(build_custom_style(font_scale=font_scale, high_contrast=high_contrast), unsafe_allow_html=True)
+    enforce_https()
 
 
-__all__ = ["THEME_COLORS", "CUSTOM_STYLE", "inject_theme"]
+__all__ = ["THEME_COLORS", "HIGH_CONTRAST_COLORS", "build_custom_style", "inject_theme"]

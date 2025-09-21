@@ -21,7 +21,8 @@ from calc import (
 from formatting import format_amount_with_unit, format_ratio
 from state import ensure_session_defaults, load_finance_bundle
 from models import INDUSTRY_TEMPLATES, CapexPlan, LoanSchedule
-from theme import inject_theme
+from theme import THEME_COLORS, inject_theme
+from ui.components import MetricCard, render_metric_cards
 from ui.streamlit_compat import use_container_width_kwargs
 
 ITEM_LABELS = {code: label for code, label, _ in ITEMS}
@@ -32,6 +33,15 @@ PLOTLY_DOWNLOAD_OPTIONS = {
     "width": 1000,
     "scale": 2,
 }
+
+ACCESSIBLE_PALETTE = [
+    THEME_COLORS["chart_blue"],
+    THEME_COLORS["chart_orange"],
+    THEME_COLORS["chart_green"],
+    THEME_COLORS["chart_purple"],
+    "#8c564b",
+    "#e377c2",
+]
 
 
 def plotly_download_config(name: str) -> Dict[str, object]:
@@ -493,76 +503,120 @@ with kpi_tab:
     def _frequency_formatter(value: Decimal) -> str:
         return f"{float(value):.2f}回"
 
+    def _tone_threshold(value: Decimal, *, positive: Decimal, caution: Decimal) -> str:
+        if value >= positive:
+            return "positive"
+        if value <= caution:
+            return "caution"
+        return "neutral"
+
     kpi_options: Dict[str, Dict[str, object]] = {
         "sales": {
             "label": "売上高",
             "value": Decimal(amounts.get("REV", Decimal("0"))),
             "formatter": _amount_formatter,
+            "icon": "💴",
+            "description": "年度売上の合計値",
         },
         "gross": {
             "label": "粗利",
             "value": Decimal(amounts.get("GROSS", Decimal("0"))),
             "formatter": _amount_formatter,
+            "icon": "🧮",
+            "description": "売上から原価を差し引いた利益",
+            "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
         "op": {
             "label": "営業利益",
             "value": Decimal(amounts.get("OP", Decimal("0"))),
             "formatter": _amount_formatter,
+            "icon": "🏭",
+            "description": "本業による利益水準",
+            "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
         "ord": {
             "label": "経常利益",
             "value": Decimal(amounts.get("ORD", Decimal("0"))),
             "formatter": _amount_formatter,
+            "icon": "📊",
+            "description": "営業外収支を含む利益",
+            "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
         "operating_cf": {
             "label": "営業キャッシュフロー",
             "value": Decimal(cf_data.get("営業キャッシュフロー", Decimal("0"))),
             "formatter": _amount_formatter,
+            "icon": "💡",
+            "description": "営業活動で得たキャッシュ",
+            "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
         "fcf": {
             "label": "フリーCF",
             "value": Decimal(cf_data.get("キャッシュ増減", Decimal("0"))),
             "formatter": _amount_formatter,
+            "icon": "🪙",
+            "description": "投資・財務CF後に残る現金",
+            "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
         "net_income": {
             "label": "税引後利益",
             "value": Decimal(cf_data.get("税引後利益", Decimal("0"))),
             "formatter": _amount_formatter,
+            "icon": "✅",
+            "description": "法人税控除後の純利益",
+            "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
         "cash": {
             "label": "期末現金残高",
             "value": Decimal(cash_total),
             "formatter": _amount_formatter,
+            "icon": "💰",
+            "description": "貸借対照表上の現金・預金残高",
+            "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
         "equity_ratio": {
             "label": "自己資本比率",
             "value": Decimal(bs_metrics.get("equity_ratio", Decimal("NaN"))),
             "formatter": format_ratio,
+            "icon": "🛡️",
+            "description": "総資産に対する自己資本の割合",
+            "tone_fn": lambda v: _tone_threshold(v, positive=Decimal("0.4"), caution=Decimal("0.2")),
         },
         "roe": {
             "label": "ROE",
             "value": Decimal(bs_metrics.get("roe", Decimal("NaN"))),
             "formatter": format_ratio,
+            "icon": "📐",
+            "description": "自己資本に対する利益率",
+            "tone_fn": lambda v: _tone_threshold(v, positive=Decimal("0.1"), caution=Decimal("0.0")),
         },
         "working_capital": {
             "label": "ネット運転資本",
             "value": Decimal(bs_metrics.get("working_capital", Decimal("0"))),
             "formatter": _yen_formatter,
+            "icon": "🔄",
+            "description": "売掛金・棚卸資産と買掛金の差分",
         },
         "customer_count": {
             "label": "年間想定顧客数",
             "value": Decimal(sales_summary.get("total_customers", Decimal("0"))),
             "formatter": _count_formatter,
+            "icon": "🙋",
+            "description": "年間に購買する顧客数の見込み",
         },
         "avg_unit_price": {
             "label": "平均客単価",
             "value": Decimal(sales_summary.get("avg_unit_price", Decimal("0"))),
             "formatter": _yen_formatter,
+            "icon": "🏷️",
+            "description": "取引1件当たりの平均売上",
         },
         "avg_frequency": {
             "label": "平均購入頻度/月",
             "value": Decimal(sales_summary.get("avg_frequency", Decimal("0"))),
             "formatter": _frequency_formatter,
+            "icon": "🔁",
+            "description": "顧客1人当たりの月間購買頻度",
         },
     }
 
@@ -593,18 +647,34 @@ with kpi_tab:
     if not selected_keys:
         selected_keys = ["sales"]
 
-    card_cols = st.columns(len(selected_keys))
-    for col, key in zip(card_cols, selected_keys):
+    cards: List[MetricCard] = []
+    for key in selected_keys:
         cfg = kpi_options.get(key)
         if not cfg:
             continue
         raw_value = Decimal(cfg.get("value", Decimal("0")))
         formatter = cfg.get("formatter", _amount_formatter)
-        if callable(formatter):
-            formatted_value = formatter(raw_value)
-        else:
-            formatted_value = str(raw_value)
-        col.metric(str(cfg.get("label")), formatted_value)
+        formatted_value = formatter(raw_value) if callable(formatter) else str(raw_value)
+        tone_fn = cfg.get("tone_fn")
+        tone = tone_fn(raw_value) if callable(tone_fn) else None
+        descriptor = str(cfg.get("description", ""))
+        assistive_text = (
+            f"{cfg.get('label')}のカード。{descriptor}" if descriptor else f"{cfg.get('label')}のカード。"
+        )
+        cards.append(
+            MetricCard(
+                icon=str(cfg.get("icon", "📊")),
+                label=str(cfg.get("label")),
+                value=str(formatted_value),
+                description=descriptor,
+                aria_label=f"{cfg.get('label')} {formatted_value}",
+                tone=tone,
+                assistive_text=assistive_text,
+            )
+        )
+
+    if cards:
+        render_metric_cards(cards, grid_aria_label="カスタムKPI")
 
     st.caption(
         f"運転資本想定: 売掛 {bs_metrics.get('receivable_days', Decimal('0'))}日 / "
@@ -612,12 +682,62 @@ with kpi_tab:
         f"買掛 {bs_metrics.get('payable_days', Decimal('0'))}日"
     )
 
-    ratio_cols = st.columns(5)
-    ratio_cols[0].metric("粗利率", format_ratio(metrics.get("gross_margin")))
-    ratio_cols[1].metric("営業利益率", format_ratio(metrics.get("op_margin")))
-    ratio_cols[2].metric("経常利益率", format_ratio(metrics.get("ord_margin")))
-    ratio_cols[3].metric("自己資本比率", format_ratio(bs_metrics.get("equity_ratio", Decimal("NaN"))))
-    ratio_cols[4].metric("ROE", format_ratio(bs_metrics.get("roe", Decimal("NaN"))))
+    financial_cards = [
+        MetricCard(
+            icon="📊",
+            label="粗利率",
+            value=format_ratio(metrics.get("gross_margin")),
+            description="粗利÷売上",
+            tone="positive" if _to_decimal(metrics.get("gross_margin", Decimal("0"))) >= Decimal("0.3") else "caution",
+            aria_label="粗利率",
+            assistive_text="粗利率のカード。粗利÷売上で収益性を確認できます。",
+        ),
+        MetricCard(
+            icon="💼",
+            label="営業利益率",
+            value=format_ratio(metrics.get("op_margin")),
+            description="営業利益÷売上",
+            tone="positive" if _to_decimal(metrics.get("op_margin", Decimal("0"))) >= Decimal("0.1") else "caution",
+            aria_label="営業利益率",
+            assistive_text="営業利益率のカード。販管費や投資負担を踏まえた収益性を示します。",
+        ),
+        MetricCard(
+            icon="📈",
+            label="経常利益率",
+            value=format_ratio(metrics.get("ord_margin")),
+            description="経常利益÷売上",
+            tone="positive" if _to_decimal(metrics.get("ord_margin", Decimal("0"))) >= Decimal("0.08") else "caution",
+            aria_label="経常利益率",
+            assistive_text="経常利益率のカード。金融収支を含む最終的な収益力を示します。",
+        ),
+        MetricCard(
+            icon="🛡️",
+            label="自己資本比率",
+            value=format_ratio(bs_metrics.get("equity_ratio", Decimal("NaN"))),
+            description="総資産に対する自己資本",
+            tone=_tone_threshold(
+                _to_decimal(bs_metrics.get("equity_ratio", Decimal("0"))),
+                positive=Decimal("0.4"),
+                caution=Decimal("0.2"),
+            ),
+            aria_label="自己資本比率",
+            assistive_text="自己資本比率のカード。財務の安定性を示し、40%超で健全域です。",
+        ),
+        MetricCard(
+            icon="🎯",
+            label="ROE",
+            value=format_ratio(bs_metrics.get("roe", Decimal("NaN"))),
+            description="自己資本利益率",
+            tone=_tone_threshold(
+                _to_decimal(bs_metrics.get("roe", Decimal("0"))),
+                positive=Decimal("0.1"),
+                caution=Decimal("0.0"),
+            ),
+            aria_label="ROE",
+            assistive_text="ROEのカード。自己資本に対する利益創出力を示します。",
+        ),
+    ]
+    render_metric_cards(financial_cards, grid_aria_label="財務KPIサマリー")
 
     monthly_pl_fig = go.Figure()
     monthly_pl_fig.add_trace(
@@ -625,7 +745,10 @@ with kpi_tab:
             name='売上原価',
             x=monthly_pl_df['month'],
             y=monthly_pl_df['売上原価'],
-            marker_color='#FF9F43',
+            marker=dict(
+                color=ACCESSIBLE_PALETTE[1],
+                pattern=dict(shape='/', fgcolor='rgba(0,0,0,0.15)'),
+            ),
             hovertemplate='月=%{x}<br>売上原価=¥%{y:,.0f}<extra></extra>',
         )
     )
@@ -634,7 +757,10 @@ with kpi_tab:
             name='販管費',
             x=monthly_pl_df['month'],
             y=monthly_pl_df['販管費'],
-            marker_color='#636EFA',
+            marker=dict(
+                color=ACCESSIBLE_PALETTE[3],
+                pattern=dict(shape='x', fgcolor='rgba(0,0,0,0.15)'),
+            ),
             hovertemplate='月=%{x}<br>販管費=¥%{y:,.0f}<extra></extra>',
         )
     )
@@ -643,7 +769,10 @@ with kpi_tab:
             name='営業利益',
             x=monthly_pl_df['month'],
             y=monthly_pl_df['営業利益'],
-            marker_color='#00CC96',
+            marker=dict(
+                color=ACCESSIBLE_PALETTE[2],
+                pattern=dict(shape='.', fgcolor='rgba(0,0,0,0.12)'),
+            ),
             hovertemplate='月=%{x}<br>営業利益=¥%{y:,.0f}<extra></extra>',
         )
     )
@@ -653,14 +782,21 @@ with kpi_tab:
             x=monthly_pl_df['month'],
             y=monthly_pl_df['売上高'],
             mode='lines+markers',
-            line=dict(color='#EF553B', width=3),
+            line=dict(color=ACCESSIBLE_PALETTE[0], width=3),
+            marker=dict(symbol='diamond-open', size=8, line=dict(color=ACCESSIBLE_PALETTE[0], width=2)),
             hovertemplate='月=%{x}<br>売上高=¥%{y:,.0f}<extra></extra>',
         )
     )
     monthly_pl_fig.update_layout(
         barmode='stack',
         hovermode='x unified',
-        legend=dict(title=dict(text=''), itemclick='toggleothers', itemdoubleclick='toggle'),
+        legend=dict(
+            title=dict(text=''),
+            itemclick='toggleothers',
+            itemdoubleclick='toggle',
+            orientation='h',
+            y=-0.18,
+        ),
         yaxis_title='金額 (円)',
         yaxis_tickformat=',',
     )
@@ -671,6 +807,7 @@ with kpi_tab:
         use_container_width=True,
         config=plotly_download_config('monthly_pl'),
     )
+    st.caption("パターン付きの棒グラフで色の違いが分かりにくい場合でも区別できます。")
 
     trend_cols = st.columns(2)
     with trend_cols[0]:
@@ -681,7 +818,8 @@ with kpi_tab:
                 y=(monthly_pl_df['粗利率'] * 100).round(4),
                 mode='lines+markers',
                 name='粗利率',
-                line=dict(color='#AB63FA'),
+                line=dict(color=ACCESSIBLE_PALETTE[4], width=3),
+                marker=dict(symbol='circle', size=8, line=dict(width=1.5, color=ACCESSIBLE_PALETTE[4])),
                 hovertemplate='月=%{x}<br>粗利率=%{y:.1f}%<extra></extra>',
             )
         )
@@ -694,6 +832,7 @@ with kpi_tab:
                 title=dict(text=''), itemclick='toggleothers', itemdoubleclick='toggle'
             ),
         )
+        margin_fig.update_yaxes(gridcolor='rgba(31, 78, 121, 0.15)', zerolinecolor='rgba(31, 78, 121, 0.3)')
         st.markdown('#### 粗利率推移')
         st.plotly_chart(
             margin_fig,
@@ -711,6 +850,10 @@ with kpi_tab:
                     hole=0.55,
                     textinfo='label+percent',
                     hovertemplate='%{label}: ¥%{value:,.0f}<extra></extra>',
+                    marker=dict(
+                        colors=ACCESSIBLE_PALETTE[: len(cost_df)],
+                        line=dict(color='#FFFFFF', width=1.5),
+                    ),
                 )
             )
             cost_fig.update_layout(
@@ -739,6 +882,10 @@ with kpi_tab:
             y=fcf_values,
             text=[f"¥{value:,.0f}" for value in fcf_values],
             hovertemplate='%{x}: ¥%{y:,.0f}<extra></extra>',
+            connector=dict(line=dict(color=THEME_COLORS["neutral"], dash='dot')),
+            increasing=dict(marker=dict(color=ACCESSIBLE_PALETTE[2])),
+            decreasing=dict(marker=dict(color=THEME_COLORS["negative"])),
+            totals=dict(marker=dict(color=THEME_COLORS["primary"])),
         )
     )
     fcf_fig.update_layout(
@@ -760,7 +907,10 @@ with kpi_tab:
                 name='営業CF',
                 x=monthly_cf_df['月'],
                 y=monthly_cf_df['営業CF'],
-                marker_color='#00CC96',
+                marker=dict(
+                    color=ACCESSIBLE_PALETTE[2],
+                    pattern=dict(shape='/', fgcolor='rgba(0,0,0,0.15)'),
+                ),
                 hovertemplate='月=%{x}<br>営業CF=¥%{y:,.0f}<extra></extra>',
             )
         )
@@ -769,7 +919,10 @@ with kpi_tab:
                 name='投資CF',
                 x=monthly_cf_df['月'],
                 y=monthly_cf_df['投資CF'],
-                marker_color='#EF553B',
+                marker=dict(
+                    color=THEME_COLORS['negative'],
+                    pattern=dict(shape='x', fgcolor='rgba(0,0,0,0.2)'),
+                ),
                 hovertemplate='月=%{x}<br>投資CF=¥%{y:,.0f}<extra></extra>',
             )
         )
@@ -778,7 +931,10 @@ with kpi_tab:
                 name='財務CF',
                 x=monthly_cf_df['月'],
                 y=monthly_cf_df['財務CF'],
-                marker_color='#636EFA',
+                marker=dict(
+                    color=ACCESSIBLE_PALETTE[0],
+                    pattern=dict(shape='\\', fgcolor='rgba(0,0,0,0.15)'),
+                ),
                 hovertemplate='月=%{x}<br>財務CF=¥%{y:,.0f}<extra></extra>',
             )
         )
@@ -788,7 +944,8 @@ with kpi_tab:
                 x=monthly_cf_df['月'],
                 y=monthly_cf_df['累計キャッシュ'],
                 mode='lines+markers',
-                line=dict(color='#FFA15A', width=3),
+                line=dict(color=ACCESSIBLE_PALETTE[5], width=3),
+                marker=dict(symbol='triangle-up', size=8, line=dict(color=ACCESSIBLE_PALETTE[5], width=1.5)),
                 hovertemplate='月=%{x}<br>累計=¥%{y:,.0f}<extra></extra>',
                 yaxis='y2',
             )
@@ -803,9 +960,19 @@ with kpi_tab:
                 side='right',
                 tickformat=',',
             ),
-            legend=dict(title=dict(text=''), itemclick='toggleothers', itemdoubleclick='toggle'),
+            legend=dict(
+                title=dict(text=''),
+                itemclick='toggleothers',
+                itemdoubleclick='toggle',
+                orientation='h',
+                yanchor='bottom',
+                y=1.02,
+                x=0,
+                bgcolor='rgba(255,255,255,0.6)',
+            ),
         )
         st.plotly_chart(cf_fig, use_container_width=True, config=plotly_download_config('monthly_cf'))
+        st.caption("各キャッシュフローは模様と形状で識別できます。")
         st.dataframe(
             monthly_cf_df,
             hide_index=True,

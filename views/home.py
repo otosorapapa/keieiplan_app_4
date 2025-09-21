@@ -10,7 +10,9 @@ from calc import compute, plan_from_models, summarize_plan_metrics
 from formatting import format_amount_with_unit, format_ratio
 from state import ensure_session_defaults, load_finance_bundle, reset_app_state
 from theme import inject_theme
+from services import auth
 from ui.chrome import HeaderActions, render_app_footer, render_app_header, render_usage_guide_panel
+from ui.components import MetricCard, render_callout, render_metric_cards
 
 
 def render_home_page() -> None:
@@ -26,6 +28,9 @@ def render_home_page() -> None:
 
     if header_actions.reset_requested:
         reset_app_state()
+        st.experimental_rerun()
+
+    if header_actions.logout_requested:
         st.experimental_rerun()
 
     if header_actions.toggled_help:
@@ -71,24 +76,65 @@ def render_home_page() -> None:
         amounts = compute(plan_cfg)
         metrics = summarize_plan_metrics(amounts)
 
-        metric_cols = st.columns(4)
-        metric_cols[0].metric("売上高", format_amount_with_unit(amounts.get("REV", Decimal("0")), unit))
-        metric_cols[1].metric("粗利率", format_ratio(metrics.get("gross_margin")))
-        metric_cols[2].metric("経常利益", format_amount_with_unit(amounts.get("ORD", Decimal("0")), unit))
-        metric_cols[3].metric("損益分岐点売上高", format_amount_with_unit(metrics.get("breakeven"), unit))
+    metric_cards = [
+        MetricCard(
+            icon="💴",
+            label="売上高",
+            value=format_amount_with_unit(amounts.get("REV", Decimal("0")), unit),
+            description="チャネル×商品×月の年間売上合計",
+            aria_label="年間売上高",
+            assistive_text="売上高のカード。チャネル×商品×月の年間売上合計です。",
+        ),
+        MetricCard(
+            icon="📈",
+            label="粗利率",
+            value=format_ratio(metrics.get("gross_margin")),
+            description="粗利÷売上で算出される利益率",
+            aria_label="粗利率",
+            tone="positive" if (metrics.get("gross_margin") or Decimal("0")) >= Decimal("0.3") else "neutral",
+            assistive_text="粗利率のカード。数値が高いほど利益体質が良好で、色とアイコンで状況を示しています。",
+        ),
+        MetricCard(
+            icon="🏦",
+            label="経常利益",
+            value=format_amount_with_unit(amounts.get("ORD", Decimal("0")), unit),
+            description="営業外収支も含めた利益水準",
+            aria_label="経常利益の金額",
+            assistive_text="経常利益のカード。営業外収支を含めた年間の利益水準です。",
+        ),
+        MetricCard(
+            icon="🎯",
+            label="損益分岐点売上高",
+            value=format_amount_with_unit(metrics.get("breakeven"), unit),
+            description="固定費を回収するために必要な売上高",
+            aria_label="損益分岐点の売上高",
+            tone="caution",
+            assistive_text="損益分岐点売上高のカード。⚠️バッジで注意が必要なことを示します。",
+        ),
+    ]
+    render_metric_cards(metric_cards, grid_aria_label="主要指標サマリー")
 
-        st.caption(f"FY{fiscal_year} 計画 ｜ 表示単位: {unit} ｜ FTE: {fte}")
+    st.caption(f"FY{fiscal_year} 計画 ｜ 表示単位: {unit} ｜ FTE: {fte}")
 
-        st.markdown("### 次のステップ")
-        st.markdown(
-            """
-            1. **Inputs** ページで売上・原価・費用・投資・借入・税制を登録する
-            2. **Analysis** ページでPL/BS/CFとKPIを確認し、損益分岐点や資金繰りをチェック
-            3. **Scenarios** ページで感度分析やシナリオ比較を行い、意思決定を支援
-            4. **Report** ページでPDF / Excel / Word を生成し、ステークホルダーと共有
-            5. **Settings** ページで単位や言語、既定値をカスタマイズ
-            """
+    if not auth.is_authenticated():
+        render_callout(
+            icon="🔐",
+            title="ログインするとクラウド保存とバージョン管理が利用できます",
+            body="ヘッダー右上のログインからアカウントを作成すると、入力データをクラウドに保存し、シナリオ別にバージョン管理できます。",
+            tone="caution",
+            aria_label="ログインを促す案内",
         )
+
+    st.markdown("### 次のステップ")
+    st.markdown(
+        """
+        1. **Inputs** ページで売上・原価・費用・投資・借入・税制を登録する
+        2. **Analysis** ページでPL/BS/CFとKPIを確認し、損益分岐点や資金繰りをチェック
+        3. **Scenarios** ページで感度分析やシナリオ比較を行い、意思決定を支援
+        4. **Report** ページでPDF / Excel / Word を生成し、ステークホルダーと共有
+        5. **Settings** ページで単位や言語、既定値をカスタマイズ
+        """
+    )
 
     with tutorial_tab:
         st.subheader("🧭 チュートリアル")

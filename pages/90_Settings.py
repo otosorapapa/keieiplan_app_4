@@ -1,6 +1,7 @@
 """Application settings for unit, language and default data."""
 from __future__ import annotations
 
+import json
 from typing import Dict
 
 import streamlit as st
@@ -14,6 +15,8 @@ from models import (
 )
 from state import ensure_session_defaults
 from theme import inject_theme
+from services import auth
+from ui.streamlit_compat import use_container_width_kwargs
 
 st.set_page_config(
     page_title="経営計画スタジオ｜Settings",
@@ -31,9 +34,14 @@ fiscal_year = int(settings_state.get("fiscal_year", 2025))
 language = str(settings_state.get("language", "ja"))
 
 st.title("⚙️ アプリ設定")
-st.caption("表示単位や言語、既定値をカスタマイズできます。変更は直ちに反映されます。")
+st.caption("表示単位や言語、既定値、データバックアップを管理できます。")
 
-unit_tab, language_tab, defaults_tab = st.tabs(["単位・期間", "言語", "既定値リセット"])
+unit_tab, language_tab, defaults_tab, backup_tab = st.tabs([
+    "単位・期間",
+    "言語",
+    "既定値リセット",
+    "バックアップ・セキュリティ",
+])
 
 with unit_tab:
     st.subheader("単位と会計期間")
@@ -64,10 +72,34 @@ with defaults_tab:
         st.toast("既定値にリセットしました。", icon="✅")
 
 if st.button("設定を保存", type="primary"):
-    st.session_state["finance_settings"] = {
-        "unit": unit,
-        "language": language,
-        "fte": float(fte),
-        "fiscal_year": int(fiscal_year),
-    }
-    st.toast("設定を保存しました。", icon="✅")
+        st.session_state["finance_settings"] = {
+            "unit": unit,
+            "language": language,
+            "fte": float(fte),
+            "fiscal_year": int(fiscal_year),
+        }
+        st.toast("設定を保存しました。", icon="✅")
+
+with backup_tab:
+    st.subheader("バックアップとセキュリティ")
+    if not auth.is_authenticated():
+        st.info("ログインすると保存データのバックアップをダウンロードできます。")
+    else:
+        current_user = auth.get_current_user()
+        if current_user:
+            st.caption(f"ログイン中: {current_user.email}")
+        backup_payload = auth.export_backup() or {}
+        backup_bytes = json.dumps(backup_payload, ensure_ascii=False, indent=2).encode("utf-8")
+        st.download_button(
+            "📥 JSONバックアップをダウンロード",
+            data=backup_bytes,
+            file_name="keieiplan_backup.json",
+            mime="application/json",
+            **use_container_width_kwargs(st.download_button),
+        )
+        st.caption("バックアップにはクラウドに保存した全ての計画とバージョン履歴が含まれます。")
+        st.markdown(
+            "- 通信は自動的にHTTPSへリダイレクトされます。\n"
+            "- パスワードはbcryptでハッシュ化され、平文では保存されません。\n"
+            "- 不要になったデータは [Inputs] ページでバージョン削除予定です。"
+        )
