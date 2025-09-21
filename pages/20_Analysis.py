@@ -20,6 +20,7 @@ from calc import (
 )
 from formatting import format_amount_with_unit, format_ratio
 from state import ensure_session_defaults, load_finance_bundle
+from models import INDUSTRY_TEMPLATES, CapexPlan, LoanSchedule
 from theme import inject_theme
 
 ITEM_LABELS = {code: label for code, label, _ in ITEMS}
@@ -126,6 +127,39 @@ def build_cost_composition(amounts_data: Dict[str, str]) -> pd.DataFrame:
             continue
         rows.append({"項目": ITEM_LABELS.get(code, code), "金額": float(value)})
     return pd.DataFrame(rows)
+
+
+def _monthly_capex_schedule(capex: CapexPlan) -> Dict[int, Decimal]:
+    schedule = {month: Decimal("0") for month in range(1, 13)}
+    for item in capex.items:
+        month = int(getattr(item, "start_month", 1))
+        month = max(1, min(12, month))
+        schedule[month] += Decimal(item.amount)
+    return schedule
+
+
+def _monthly_interest_schedule(loans: LoanSchedule) -> Dict[int, Decimal]:
+    schedule = {month: Decimal("0") for month in range(1, 13)}
+    for loan in loans.loans:
+        principal = Decimal(loan.principal)
+        rate = Decimal(loan.interest_rate)
+        term_months = int(loan.term_months)
+        start_month = int(loan.start_month)
+        outstanding = principal
+        for offset in range(term_months):
+            month_index = start_month + offset
+            interest = outstanding * rate / Decimal("12")
+            if 1 <= month_index <= 12:
+                schedule[month_index] += interest
+            if loan.repayment_type == "equal_principal":
+                principal_payment = principal / Decimal(term_months)
+            else:
+                principal_payment = principal if offset == term_months - 1 else Decimal("0")
+            principal_payment = min(principal_payment, outstanding)
+            outstanding = max(Decimal("0"), outstanding - principal_payment)
+            if month_index >= 12:
+                break
+    return schedule
 
 
 def _cost_structure(
@@ -294,8 +328,18 @@ plan_cfg = plan_from_models(
 
 amounts = compute(plan_cfg)
 metrics = summarize_plan_metrics(amounts)
-bs_data = generate_balance_sheet(amounts, bundle.capex, bundle.loans, bundle.tax)
+working_capital_profile = st.session_state.get("working_capital_profile", {})
+bs_data = generate_balance_sheet(
+    amounts,
+    bundle.capex,
+    bundle.loans,
+    bundle.tax,
+    working_capital=working_capital_profile,
+)
 cf_data = generate_cash_flow(amounts, bundle.capex, bundle.loans, bundle.tax)
+sales_summary = bundle.sales.assumption_summary()
+capex_schedule = _monthly_capex_schedule(bundle.capex)
+interest_schedule = _monthly_interest_schedule(bundle.loans)
 
 plan_items_serialized = {
     code: {
@@ -319,6 +363,114 @@ cvp_df, variable_rate, fixed_cost, breakeven_sales = build_cvp_dataframe(
 fcf_steps = build_fcf_steps(amounts_serialized, tax_dump, capex_dump, loans_dump)
 operating_cf_str = str(cf_data.get("営業キャッシュフロー", Decimal("0")))
 dscr_df = build_dscr_timeseries(loans_dump, operating_cf_str)
+bs_metrics = bs_data.get("metrics", {})
+cash_total = bs_data.get("assets", {}).get("現金同等物", Decimal("0"))
+industry_template_key = str(st.session_state.get("selected_industry_template", ""))
+industry_metric_state: Dict[str, Dict[str, float]] = st.session_state.get(
+    "industry_custom_metrics", {}
+)
+external_actuals: Dict[str, Dict[str, object]] = st.session_state.get("external_actuals", {})
+
+depreciation_total = Decimal(amounts.get("OPEX_DEP", Decimal("0")))
+monthly_depreciation = depreciation_total / Decimal("12") if depreciation_total else Decimal("0")
+non_operating_income_total = sum(
+    (Decimal(amounts.get(code, Decimal("0"))) for code in ["NOI_MISC", "NOI_GRANT", "NOI_OTH"]),
+    start=Decimal("0"),
+)
+non_operating_expense_total = sum(
+    (Decimal(amounts.get(code, Decimal("0"))) for code in ["NOE_INT", "NOE_OTH"]),
+    start=Decimal("0"),
+)
+monthly_noi = non_operating_income_total / Decimal("12") if non_operating_income_total else Decimal("0")
+monthly_noe = non_operating_expense_total / Decimal("12") if non_operating_expense_total else Decimal("0")
+tax_rate = Decimal(bundle.tax.corporate_tax_rate)
+
+monthly_cf_entries: List[Dict[str, Decimal]] = []
+running_cash = Decimal("0")
+for idx, row in monthly_pl_df.iterrows():
+    month_index = idx + 1
+    operating_profit = Decimal(str(row["営業利益"]))
+    ordinary_income_month = operating_profit + monthly_noi - monthly_noe
+    taxes_month = ordinary_income_month * tax_rate if ordinary_income_month > 0 else Decimal("0")
+    operating_cf_month = ordinary_income_month + monthly_depreciation - taxes_month
+    investing_cf_month = -capex_schedule.get(month_index, Decimal("0"))
+    financing_cf_month = -interest_schedule.get(month_index, Decimal("0"))
+    net_cf_month = operating_cf_month + investing_cf_month + financing_cf_month
+    running_cash += net_cf_month
+    monthly_cf_entries.append(
+        {
+            "month": row["month"],
+            "operating": operating_cf_month,
+            "investing": investing_cf_month,
+            "financing": financing_cf_month,
+            "taxes": taxes_month,
+            "net": net_cf_month,
+            "cumulative": running_cash,
+        }
+    )
+
+if monthly_cf_entries:
+    desired_cash = cash_total
+    diff = desired_cash - monthly_cf_entries[-1]["cumulative"]
+    if abs(diff) > Decimal("1"):
+        adjustment = diff / Decimal(len(monthly_cf_entries))
+        running_cash = Decimal("0")
+        for entry in monthly_cf_entries:
+            entry["net"] += adjustment
+            running_cash += entry["net"]
+            entry["cumulative"] = running_cash
+
+monthly_cf_df = pd.DataFrame(
+    [
+        {
+            "月": entry["month"],
+            "営業CF": float(entry["operating"]),
+            "投資CF": float(entry["investing"]),
+            "財務CF": float(entry["financing"]),
+            "税金": float(entry["taxes"]),
+            "月次純増減": float(entry["net"]),
+            "累計キャッシュ": float(entry["cumulative"]),
+        }
+        for entry in monthly_cf_entries
+    ]
+)
+
+ar_total = bs_data.get("assets", {}).get("売掛金", Decimal("0"))
+inventory_total = bs_data.get("assets", {}).get("棚卸資産", Decimal("0"))
+ap_total = bs_data.get("liabilities", {}).get("買掛金", Decimal("0"))
+net_pp_e = bs_data.get("assets", {}).get("有形固定資産", Decimal("0"))
+interest_debt_total = bs_data.get("liabilities", {}).get("有利子負債", Decimal("0"))
+total_sales_decimal = Decimal(str(monthly_pl_df["売上高"].sum()))
+total_cogs_decimal = Decimal(str(monthly_pl_df["売上原価"].sum()))
+
+monthly_bs_rows: List[Dict[str, float]] = []
+for idx, row in monthly_pl_df.iterrows():
+    month_label = row["month"]
+    sales = Decimal(str(row["売上高"]))
+    cogs = Decimal(str(row["売上原価"]))
+    sales_ratio = sales / total_sales_decimal if total_sales_decimal > 0 else Decimal("0")
+    cogs_ratio = cogs / total_cogs_decimal if total_cogs_decimal > 0 else Decimal("0")
+    ar_month = ar_total * sales_ratio
+    inventory_month = inventory_total * cogs_ratio
+    ap_month = ap_total * cogs_ratio
+    cumulative_cash = (
+        Decimal(str(monthly_cf_df.iloc[idx]["累計キャッシュ"])) if not monthly_cf_df.empty else Decimal("0")
+    )
+    equity_month = cumulative_cash + ar_month + inventory_month + net_pp_e - ap_month - interest_debt_total
+    monthly_bs_rows.append(
+        {
+            "月": month_label,
+            "現金同等物": float(cumulative_cash),
+            "売掛金": float(ar_month),
+            "棚卸資産": float(inventory_month),
+            "有形固定資産": float(net_pp_e),
+            "買掛金": float(ap_month),
+            "有利子負債": float(interest_debt_total),
+            "純資産": float(equity_month),
+        }
+    )
+
+monthly_bs_df = pd.DataFrame(monthly_bs_rows)
 
 st.title("📈 KPI・損益分析")
 st.caption(f"FY{fiscal_year} / 表示単位: {unit} / FTE: {fte}")
@@ -327,16 +479,144 @@ kpi_tab, be_tab, cash_tab = st.tabs(["KPIダッシュボード", "損益分岐�
 
 with kpi_tab:
     st.subheader("主要KPI")
-    top_cols = st.columns(4)
-    top_cols[0].metric("売上高", format_amount_with_unit(amounts.get("REV", Decimal("0")), unit))
-    top_cols[1].metric("粗利", format_amount_with_unit(amounts.get("GROSS", Decimal("0")), unit))
-    top_cols[2].metric("営業利益", format_amount_with_unit(amounts.get("OP", Decimal("0")), unit))
-    top_cols[3].metric("経常利益", format_amount_with_unit(amounts.get("ORD", Decimal("0")), unit))
 
-    ratio_cols = st.columns(3)
+    def _amount_formatter(value: Decimal) -> str:
+        return format_amount_with_unit(value, unit)
+
+    def _yen_formatter(value: Decimal) -> str:
+        return format_amount_with_unit(value, "円")
+
+    def _count_formatter(value: Decimal) -> str:
+        return f"{int(value)}人"
+
+    def _frequency_formatter(value: Decimal) -> str:
+        return f"{float(value):.2f}回"
+
+    kpi_options: Dict[str, Dict[str, object]] = {
+        "sales": {
+            "label": "売上高",
+            "value": Decimal(amounts.get("REV", Decimal("0"))),
+            "formatter": _amount_formatter,
+        },
+        "gross": {
+            "label": "粗利",
+            "value": Decimal(amounts.get("GROSS", Decimal("0"))),
+            "formatter": _amount_formatter,
+        },
+        "op": {
+            "label": "営業利益",
+            "value": Decimal(amounts.get("OP", Decimal("0"))),
+            "formatter": _amount_formatter,
+        },
+        "ord": {
+            "label": "経常利益",
+            "value": Decimal(amounts.get("ORD", Decimal("0"))),
+            "formatter": _amount_formatter,
+        },
+        "operating_cf": {
+            "label": "営業キャッシュフロー",
+            "value": Decimal(cf_data.get("営業キャッシュフロー", Decimal("0"))),
+            "formatter": _amount_formatter,
+        },
+        "fcf": {
+            "label": "フリーCF",
+            "value": Decimal(cf_data.get("キャッシュ増減", Decimal("0"))),
+            "formatter": _amount_formatter,
+        },
+        "net_income": {
+            "label": "税引後利益",
+            "value": Decimal(cf_data.get("税引後利益", Decimal("0"))),
+            "formatter": _amount_formatter,
+        },
+        "cash": {
+            "label": "期末現金残高",
+            "value": Decimal(cash_total),
+            "formatter": _amount_formatter,
+        },
+        "equity_ratio": {
+            "label": "自己資本比率",
+            "value": Decimal(bs_metrics.get("equity_ratio", Decimal("NaN"))),
+            "formatter": format_ratio,
+        },
+        "roe": {
+            "label": "ROE",
+            "value": Decimal(bs_metrics.get("roe", Decimal("NaN"))),
+            "formatter": format_ratio,
+        },
+        "working_capital": {
+            "label": "ネット運転資本",
+            "value": Decimal(bs_metrics.get("working_capital", Decimal("0"))),
+            "formatter": _yen_formatter,
+        },
+        "customer_count": {
+            "label": "年間想定顧客数",
+            "value": Decimal(sales_summary.get("total_customers", Decimal("0"))),
+            "formatter": _count_formatter,
+        },
+        "avg_unit_price": {
+            "label": "平均客単価",
+            "value": Decimal(sales_summary.get("avg_unit_price", Decimal("0"))),
+            "formatter": _yen_formatter,
+        },
+        "avg_frequency": {
+            "label": "平均購入頻度/月",
+            "value": Decimal(sales_summary.get("avg_frequency", Decimal("0"))),
+            "formatter": _frequency_formatter,
+        },
+    }
+
+    if "custom_kpi_selection" not in st.session_state:
+        base_default = ["sales", "gross", "op", "operating_cf"]
+        suggestion_map = {"customers": "customer_count", "unit_price": "avg_unit_price", "frequency": "avg_frequency"}
+        suggestions: List[str] = []
+        template_metrics = industry_metric_state.get(industry_template_key, {})
+        for cfg in template_metrics.values():
+            metric_type = str(cfg.get("type", ""))
+            mapped = suggestion_map.get(metric_type)
+            if mapped and mapped not in suggestions and mapped in kpi_options:
+                suggestions.append(mapped)
+        st.session_state["custom_kpi_selection"] = list(dict.fromkeys(base_default + suggestions))
+
+    with st.expander("カードをカスタマイズ", expanded=False):
+        current_selection = st.session_state.get("custom_kpi_selection", [])
+        selection = st.multiselect(
+            "表示するKPIカード",
+            list(kpi_options.keys()),
+            default=current_selection,
+            format_func=lambda key: str(kpi_options[key]["label"]),
+        )
+        if selection:
+            st.session_state["custom_kpi_selection"] = selection
+
+    selected_keys = st.session_state.get("custom_kpi_selection", [])
+    if not selected_keys:
+        selected_keys = ["sales"]
+
+    card_cols = st.columns(len(selected_keys))
+    for col, key in zip(card_cols, selected_keys):
+        cfg = kpi_options.get(key)
+        if not cfg:
+            continue
+        raw_value = Decimal(cfg.get("value", Decimal("0")))
+        formatter = cfg.get("formatter", _amount_formatter)
+        if callable(formatter):
+            formatted_value = formatter(raw_value)
+        else:
+            formatted_value = str(raw_value)
+        col.metric(str(cfg.get("label")), formatted_value)
+
+    st.caption(
+        f"運転資本想定: 売掛 {bs_metrics.get('receivable_days', Decimal('0'))}日 / "
+        f"棚卸 {bs_metrics.get('inventory_days', Decimal('0'))}日 / "
+        f"買掛 {bs_metrics.get('payable_days', Decimal('0'))}日"
+    )
+
+    ratio_cols = st.columns(5)
     ratio_cols[0].metric("粗利率", format_ratio(metrics.get("gross_margin")))
     ratio_cols[1].metric("営業利益率", format_ratio(metrics.get("op_margin")))
     ratio_cols[2].metric("経常利益率", format_ratio(metrics.get("ord_margin")))
+    ratio_cols[3].metric("自己資本比率", format_ratio(bs_metrics.get("equity_ratio", Decimal("NaN"))))
+    ratio_cols[4].metric("ROE", format_ratio(bs_metrics.get("roe", Decimal("NaN"))))
 
     monthly_pl_fig = go.Figure()
     monthly_pl_fig.add_trace(
@@ -471,6 +751,70 @@ with kpi_tab:
         config=plotly_download_config('fcf_waterfall'),
     )
 
+    st.markdown('### 月次キャッシュフローと累計キャッシュ')
+    if not monthly_cf_df.empty:
+        cf_fig = go.Figure()
+        cf_fig.add_trace(
+            go.Bar(
+                name='営業CF',
+                x=monthly_cf_df['月'],
+                y=monthly_cf_df['営業CF'],
+                marker_color='#00CC96',
+                hovertemplate='月=%{x}<br>営業CF=¥%{y:,.0f}<extra></extra>',
+            )
+        )
+        cf_fig.add_trace(
+            go.Bar(
+                name='投資CF',
+                x=monthly_cf_df['月'],
+                y=monthly_cf_df['投資CF'],
+                marker_color='#EF553B',
+                hovertemplate='月=%{x}<br>投資CF=¥%{y:,.0f}<extra></extra>',
+            )
+        )
+        cf_fig.add_trace(
+            go.Bar(
+                name='財務CF',
+                x=monthly_cf_df['月'],
+                y=monthly_cf_df['財務CF'],
+                marker_color='#636EFA',
+                hovertemplate='月=%{x}<br>財務CF=¥%{y:,.0f}<extra></extra>',
+            )
+        )
+        cf_fig.add_trace(
+            go.Scatter(
+                name='累計キャッシュ',
+                x=monthly_cf_df['月'],
+                y=monthly_cf_df['累計キャッシュ'],
+                mode='lines+markers',
+                line=dict(color='#FFA15A', width=3),
+                hovertemplate='月=%{x}<br>累計=¥%{y:,.0f}<extra></extra>',
+                yaxis='y2',
+            )
+        )
+        cf_fig.update_layout(
+            barmode='relative',
+            hovermode='x unified',
+            yaxis=dict(title='金額 (円)', tickformat=','),
+            yaxis2=dict(
+                title='累計キャッシュ (円)',
+                overlaying='y',
+                side='right',
+                tickformat=',',
+            ),
+            legend=dict(title=dict(text=''), itemclick='toggleothers', itemdoubleclick='toggle'),
+        )
+        st.plotly_chart(cf_fig, use_container_width=True, config=plotly_download_config('monthly_cf'))
+        st.dataframe(monthly_cf_df, use_container_width=True, hide_index=True)
+    else:
+        st.info('月次キャッシュフローを表示するデータがありません。')
+
+    st.markdown('### 月次バランスシート')
+    if not monthly_bs_df.empty:
+        st.dataframe(monthly_bs_df, use_container_width=True, hide_index=True)
+    else:
+        st.info('月次バランスシートを表示するデータがありません。')
+
     st.markdown('### PLサマリー')
     pl_rows: List[Dict[str, object]] = []
     for code, label, group in ITEMS:
@@ -480,6 +824,95 @@ with kpi_tab:
         pl_rows.append({'カテゴリ': group, '項目': label, '金額': float(value)})
     pl_df = pd.DataFrame(pl_rows)
     st.dataframe(pl_df, use_container_width=True, hide_index=True)
+
+    if external_actuals:
+        st.markdown('### 予実差異分析')
+        actual_sales_map = external_actuals.get('sales', {}).get('monthly', {})
+        actual_variable_map = external_actuals.get('variable_costs', {}).get('monthly', {})
+        actual_fixed_map = external_actuals.get('fixed_costs', {}).get('monthly', {})
+
+        actual_sales_total = sum((Decimal(str(v)) for v in actual_sales_map.values()), start=Decimal('0'))
+        actual_variable_total = sum((Decimal(str(v)) for v in actual_variable_map.values()), start=Decimal('0'))
+        actual_fixed_total = sum((Decimal(str(v)) for v in actual_fixed_map.values()), start=Decimal('0'))
+
+        plan_sales_total = Decimal(amounts.get('REV', Decimal('0')))
+        plan_gross_total = Decimal(amounts.get('GROSS', Decimal('0')))
+        plan_variable_total = Decimal(amounts.get('COGS_TTL', Decimal('0')))
+        plan_fixed_total = Decimal(amounts.get('OPEX_TTL', Decimal('0')))
+        plan_op_total = Decimal(amounts.get('OP', Decimal('0')))
+
+        actual_gross_total = actual_sales_total - actual_variable_total
+        actual_op_total = actual_gross_total - actual_fixed_total
+
+        variance_rows = [
+            {
+                '項目': '売上高',
+                '予算': plan_sales_total,
+                '実績': actual_sales_total,
+                '差異': actual_sales_total - plan_sales_total,
+            },
+            {
+                '項目': '粗利',
+                '予算': plan_gross_total,
+                '実績': actual_gross_total,
+                '差異': actual_gross_total - plan_gross_total,
+            },
+            {
+                '項目': '営業利益',
+                '予算': plan_op_total,
+                '実績': actual_op_total,
+                '差異': actual_op_total - plan_op_total,
+            },
+        ]
+
+        formatted_rows: List[Dict[str, str]] = []
+        for row in variance_rows:
+            plan_val = row['予算']
+            actual_val = row['実績']
+            diff_val = row['差異']
+            variance_ratio = diff_val / plan_val if plan_val not in (Decimal('0'), Decimal('NaN')) else Decimal('NaN')
+            formatted_rows.append(
+                {
+                    '項目': row['項目'],
+                    '予算': format_amount_with_unit(plan_val, unit),
+                    '実績': format_amount_with_unit(actual_val, unit),
+                    '差異': format_amount_with_unit(diff_val, unit),
+                    '差異率': format_ratio(variance_ratio),
+                }
+            )
+        variance_display_df = pd.DataFrame(formatted_rows)
+        st.dataframe(variance_display_df, use_container_width=True, hide_index=True)
+
+        sales_diff = actual_sales_total - plan_sales_total
+        sales_diff_ratio = sales_diff / plan_sales_total if plan_sales_total else Decimal('NaN')
+        act_lines: List[str] = []
+        if plan_sales_total > 0:
+            if sales_diff < 0:
+                act_lines.append('売上が計画を下回っているため、チャネル別の客数と単価前提を再確認し販促計画を見直しましょう。')
+            else:
+                act_lines.append('売上が計画を上回っています。好調チャネルへの投資増や在庫確保を検討できます。')
+        if actual_variable_total > plan_variable_total:
+            act_lines.append('原価率が悪化しているため、仕入条件や値上げ余地を検証してください。')
+        if actual_fixed_total > plan_fixed_total:
+            act_lines.append('固定費が計画を超過しています。人件費や販管費の効率化施策を検討しましょう。')
+        if not act_lines:
+            act_lines.append('計画に対して大きな乖離はありません。現状の施策を継続しつつ改善余地を探索しましょう。')
+
+        st.markdown('#### PDCAサマリー')
+        plan_text = format_amount_with_unit(plan_sales_total, unit)
+        plan_op_text = format_amount_with_unit(plan_op_total, unit)
+        actual_text = format_amount_with_unit(actual_sales_total, unit)
+        actual_op_text = format_amount_with_unit(actual_op_total, unit)
+        sales_diff_text = format_amount_with_unit(sales_diff, unit)
+        sales_diff_ratio_text = format_ratio(sales_diff_ratio)
+        act_html = ''.join(f'- {line}<br/>' for line in act_lines)
+        st.markdown(
+            f"- **Plan:** 売上 {plan_text} / 営業利益 {plan_op_text}<br/>"
+            f"- **Do:** 実績 売上 {actual_text} / 営業利益 {actual_op_text}<br/>"
+            f"- **Check:** 売上差異 {sales_diff_text} ({sales_diff_ratio_text})<br/>"
+            f"- **Act:**<br/>{act_html}",
+            unsafe_allow_html=True,
+        )
 
 with be_tab:
     st.subheader("損益分岐点分析")
