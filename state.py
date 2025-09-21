@@ -66,6 +66,8 @@ STATE_SPECS: Dict[str, StateSpec] = {
         dict,
         "共通設定（単位・言語・FTEなど）",
     ),
+    "ui_font_scale": StateSpec(lambda: 1.0, (float, int), "アクセシビリティ用フォント倍率"),
+    "ui_high_contrast": StateSpec(lambda: False, bool, "高コントラスト表示の有効化"),
     "selected_industry_template": StateSpec(lambda: "", str, "選択された業種テンプレートキー"),
     "working_capital_profile": StateSpec(
         lambda: {"receivable_days": 45.0, "inventory_days": 30.0, "payable_days": 25.0},
