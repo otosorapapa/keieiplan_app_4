@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 import streamlit as st
+from ui.streamlit_compat import use_container_width_kwargs
 
 USAGE_GUIDE_TEXT = (
     "1. **入力を整える**: コントロールハブで売上・コストのレバーと会計年度、FTEを設定します。\n"
@@ -45,8 +46,8 @@ def render_app_header(
         with help_col:
             if st.button(
                 help_button_label,
-                use_container_width=True,
                 key=f"{help_key}_toggle_button",
+                **use_container_width_kwargs(st.button),
             ):
                 toggled_help = True
         if show_reset:
@@ -54,9 +55,9 @@ def render_app_header(
             with reset_col:
                 if st.button(
                     reset_label,
-                    use_container_width=True,
                     key="app_reset_all_button",
                     help="入力値と分析結果を初期状態に戻します。",
+                    **use_container_width_kwargs(st.button),
                 ):
                     reset_requested = True
                     if on_reset is not None:

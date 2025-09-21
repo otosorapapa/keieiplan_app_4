@@ -22,6 +22,7 @@ from formatting import format_amount_with_unit, format_ratio
 from state import ensure_session_defaults, load_finance_bundle
 from models import INDUSTRY_TEMPLATES, CapexPlan, LoanSchedule
 from theme import inject_theme
+from ui.streamlit_compat import use_container_width_kwargs
 
 ITEM_LABELS = {code: label for code, label, _ in ITEMS}
 
@@ -805,13 +806,21 @@ with kpi_tab:
             legend=dict(title=dict(text=''), itemclick='toggleothers', itemdoubleclick='toggle'),
         )
         st.plotly_chart(cf_fig, use_container_width=True, config=plotly_download_config('monthly_cf'))
-        st.dataframe(monthly_cf_df, use_container_width=True, hide_index=True)
+        st.dataframe(
+            monthly_cf_df,
+            hide_index=True,
+            **use_container_width_kwargs(st.dataframe),
+        )
     else:
         st.info('月次キャッシュフローを表示するデータがありません。')
 
     st.markdown('### 月次バランスシート')
     if not monthly_bs_df.empty:
-        st.dataframe(monthly_bs_df, use_container_width=True, hide_index=True)
+        st.dataframe(
+            monthly_bs_df,
+            hide_index=True,
+            **use_container_width_kwargs(st.dataframe),
+        )
     else:
         st.info('月次バランスシートを表示するデータがありません。')
 
@@ -823,7 +832,11 @@ with kpi_tab:
         value = amounts.get(code, Decimal('0'))
         pl_rows.append({'カテゴリ': group, '項目': label, '金額': float(value)})
     pl_df = pd.DataFrame(pl_rows)
-    st.dataframe(pl_df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        pl_df,
+        hide_index=True,
+        **use_container_width_kwargs(st.dataframe),
+    )
 
     if external_actuals:
         st.markdown('### 予実差異分析')
@@ -881,7 +894,11 @@ with kpi_tab:
                 }
             )
         variance_display_df = pd.DataFrame(formatted_rows)
-        st.dataframe(variance_display_df, use_container_width=True, hide_index=True)
+        st.dataframe(
+            variance_display_df,
+            hide_index=True,
+            **use_container_width_kwargs(st.dataframe),
+        )
 
         sales_diff = actual_sales_total - plan_sales_total
         sales_diff_ratio = sales_diff / plan_sales_total if plan_sales_total else Decimal('NaN')
@@ -990,13 +1007,21 @@ with be_tab:
         for name, value in records.items():
             bs_rows.append({"区分": section, "項目": name, "金額": float(value)})
     bs_df = pd.DataFrame(bs_rows)
-    st.dataframe(bs_df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        bs_df,
+        hide_index=True,
+        **use_container_width_kwargs(st.dataframe),
+    )
 
 with cash_tab:
     st.subheader("キャッシュフロー")
     cf_rows = [{"区分": key, "金額": float(value)} for key, value in cf_data.items()]
     cf_df = pd.DataFrame(cf_rows)
-    st.dataframe(cf_df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        cf_df,
+        hide_index=True,
+        **use_container_width_kwargs(st.dataframe),
+    )
 
     cf_fig = go.Figure(
         go.Bar(
