@@ -1422,24 +1422,24 @@ elif current_step == "sales":
             )
             for month in MONTH_COLUMNS
         }
+        download_cols = st.columns(2)
+        with download_cols[0]:
+            st.download_button(
+                "CSVテンプレートDL",
+                data=_sales_template_to_csv(sales_df),
+                file_name="sales_template.csv",
+                mime="text/csv",
+                **use_container_width_kwargs(st.download_button),
+            )
+        with download_cols[1]:
+            st.download_button(
+                "ExcelテンプレートDL",
+                data=_sales_template_to_excel(sales_df),
+                file_name="sales_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                **use_container_width_kwargs(st.download_button),
+            )
         with st.form("sales_template_form"):
-            download_cols = st.columns(2)
-            with download_cols[0]:
-                st.download_button(
-                    "CSVテンプレートDL",
-                    data=_sales_template_to_csv(sales_df),
-                    file_name="sales_template.csv",
-                    mime="text/csv",
-                    **use_container_width_kwargs(st.download_button),
-                )
-            with download_cols[1]:
-                st.download_button(
-                    "ExcelテンプレートDL",
-                    data=_sales_template_to_excel(sales_df),
-                    file_name="sales_template.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    **use_container_width_kwargs(st.download_button),
-                )
             uploaded_template = st.file_uploader(
                 "テンプレートをアップロード (最大5MB)",
                 type=["csv", "xlsx"],
