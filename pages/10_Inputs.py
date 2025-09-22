@@ -19,14 +19,17 @@ from models import (
     DEFAULT_TAX_POLICY,
     INDUSTRY_TEMPLATES,
     MONTH_SEQUENCE,
+    EstimateRange,
 )
 from state import ensure_session_defaults
 from services import auth
 from services.auth import AuthError
+from services.fermi_learning import range_profile_from_estimate, update_learning_state
 from theme import inject_theme
 from ui.components import render_callout
 from validators import ValidationIssue, validate_bundle
 from ui.streamlit_compat import use_container_width_kwargs
+from ui.fermi import FERMI_SEASONAL_PATTERNS, compute_fermi_estimate
 
 st.set_page_config(
     page_title="経営計画スタジオ｜Inputs",
@@ -53,8 +56,13 @@ validation_errors: List[ValidationIssue] = st.session_state.get("finance_validat
 
 MONTH_COLUMNS = [f"月{m:02d}" for m in MONTH_SEQUENCE]
 ASSUMPTION_NUMERIC_COLUMNS = ["想定顧客数", "客単価", "購入頻度(月)"]
+ASSUMPTION_RANGE_COLUMNS = ["年間売上(最低)", "年間売上(中央値)", "年間売上(最高)"]
 ASSUMPTION_TEXT_COLUMNS = ["メモ"]
-ASSUMPTION_COLUMNS = [*ASSUMPTION_NUMERIC_COLUMNS, *ASSUMPTION_TEXT_COLUMNS]
+ASSUMPTION_COLUMNS = [
+    *ASSUMPTION_NUMERIC_COLUMNS,
+    *ASSUMPTION_RANGE_COLUMNS,
+    *ASSUMPTION_TEXT_COLUMNS,
+]
 SALES_TEMPLATE_STATE_KEY = "sales_template_df"
 SALES_CHANNEL_COUNTER_KEY = "sales_channel_counter"
 SALES_PRODUCT_COUNTER_KEY = "sales_product_counter"
@@ -176,6 +184,409 @@ def _hydrate_snapshot(snapshot: Dict[str, object]) -> bool:
     return True
 
 
+def _ensure_cost_range_state(
+    range_defaults: Dict[str, object],
+    *,
+    variable_defaults: Dict[str, object],
+    fixed_defaults: Dict[str, object],
+    noi_defaults: Dict[str, object],
+    noe_defaults: Dict[str, object],
+    unit_factor: Decimal,
+) -> None:
+    state: Dict[str, Dict[str, float]] = st.session_state.get(COST_RANGE_STATE_KEY, {})
+    if not isinstance(state, dict):
+        state = {}
+
+    def _profile_from_defaults(code: str, defaults: Dict[str, object], divisor: Decimal) -> Dict[str, float]:
+        base = Decimal(str(defaults.get(code, 0.0)))
+        divisor = divisor or Decimal("1")
+        base_value = float(base / divisor)
+        return {"min": base_value, "typical": base_value, "max": base_value}
+
+    combined_defaults = {
+        **{code: (variable_defaults.get(code, 0.0), Decimal("1")) for code in VARIABLE_RATIO_CODES},
+        **{code: (fixed_defaults.get(code, 0.0), unit_factor) for code in FIXED_COST_CODES},
+        **{code: (noi_defaults.get(code, 0.0), unit_factor) for code in NOI_CODES},
+        **{code: (noe_defaults.get(code, 0.0), unit_factor) for code in NOE_CODES},
+    }
+
+    for code, (default_value, divisor) in combined_defaults.items():
+        if code in range_defaults:
+            raw = range_defaults[code]
+            if isinstance(raw, EstimateRange):
+                profile = range_profile_from_estimate(raw, divisor)
+            elif isinstance(raw, dict):
+                profile = range_profile_from_estimate(EstimateRange(**raw), divisor)
+            else:  # pragma: no cover - defensive
+                profile = _profile_from_defaults(code, {code: default_value}, divisor)
+        else:
+            profile = _profile_from_defaults(code, {code: default_value}, divisor)
+        if code not in state:
+            state[code] = profile
+    st.session_state[COST_RANGE_STATE_KEY] = state
+
+
+def _update_cost_range_state_from_editor(updated: pd.DataFrame) -> None:
+    state: Dict[str, Dict[str, float]] = st.session_state.get(COST_RANGE_STATE_KEY, {})
+    if not isinstance(state, dict):
+        state = {}
+    for _, row in updated.iterrows():
+        code = str(row.get("コード", "")).strip()
+        if not code:
+            continue
+        minimum = float(max(0.0, row.get("最小", 0.0) or 0.0))
+        typical = float(max(0.0, row.get("中央値", minimum) or minimum))
+        maximum = float(max(typical, row.get("最大", typical) or typical))
+        state[code] = {"min": minimum, "typical": typical, "max": maximum}
+    st.session_state[COST_RANGE_STATE_KEY] = state
+
+
+def _calculate_sales_total(df: pd.DataFrame) -> Decimal:
+    if df.empty:
+        return Decimal("0")
+    total = Decimal("0")
+    for month_col in MONTH_COLUMNS:
+        if month_col in df.columns:
+            series = pd.to_numeric(df[month_col], errors="coerce").fillna(0.0)
+            total += Decimal(str(series.sum()))
+    return total
+
+
+def _update_fermi_learning(plan_total: Decimal, actual_total: Decimal) -> None:
+    learning_state: Dict[str, object] = st.session_state.get("fermi_learning", {})
+    updated = update_learning_state(learning_state, plan_total, actual_total)
+    st.session_state["fermi_learning"] = updated
+
+
+def _maybe_show_tutorial(step_id: str, message: str) -> None:
+    if not st.session_state.get("tutorial_mode", True):
+        return
+    shown = st.session_state.get("tutorial_shown_steps")
+    if not isinstance(shown, set):
+        shown = set()
+    if step_id in shown:
+        return
+    st.toast(message, icon="💡")
+    shown.add(step_id)
+    st.session_state["tutorial_shown_steps"] = shown
+
+
+def _render_completion_checklist(flags: Dict[str, bool]) -> None:
+    with st.expander("進捗チェックリスト", expanded=False):
+        checklist_lines = []
+        for step in WIZARD_STEPS:
+            completed = flags.get(step["id"], False)
+            icon = "✅" if completed else "⬜️"
+            checklist_lines.append(
+                f"<div class='wizard-checklist__item'><span>{icon}</span><span>{step['title']}</span></div>"
+            )
+        st.markdown("<div class='wizard-checklist'>" + "".join(checklist_lines) + "</div>", unsafe_allow_html=True)
+
+
+def _calculate_completion_flags(
+    *,
+    context_state: Dict[str, str],
+    sales_df: pd.DataFrame,
+    variable_defaults: Dict[str, object],
+    fixed_defaults: Dict[str, object],
+    capex_df: pd.DataFrame,
+    loan_df: pd.DataFrame,
+) -> Dict[str, bool]:
+    context_complete = any(str(value).strip() for value in context_state.values())
+    sales_complete = _calculate_sales_total(sales_df) > Decimal("0")
+    variable_complete = any(Decimal(str(value)) > Decimal("0") for value in variable_defaults.values())
+    fixed_complete = any(Decimal(str(value)) > Decimal("0") for value in fixed_defaults.values())
+    invest_complete = False
+    if not capex_df.empty:
+        invest_complete = any(
+            Decimal(str(row.get("金額", 0) if not pd.isna(row.get("金額", 0)) else 0)) > Decimal("0")
+            for _, row in capex_df.iterrows()
+        )
+    if not invest_complete and not loan_df.empty:
+        invest_complete = any(
+            Decimal(str(row.get("元本", 0) if not pd.isna(row.get("元本", 0)) else 0)) > Decimal("0")
+            for _, row in loan_df.iterrows()
+        )
+    tax_complete = bool(st.session_state.get("finance_models"))
+    return {
+        "context": context_complete,
+        "sales": sales_complete,
+        "costs": variable_complete or fixed_complete,
+        "invest": invest_complete,
+        "tax": tax_complete,
+    }
+
+
+def _apply_fermi_result(sales_df: pd.DataFrame) -> pd.DataFrame:
+    result: Dict[str, object] | None = st.session_state.get(FERMI_RESULT_STATE_KEY)
+    if not isinstance(result, dict):
+        return sales_df
+    monthly_adjusted = result.get("monthly_adjusted") or result.get("monthly_typical")
+    if not monthly_adjusted:
+        return sales_df
+    values = list(monthly_adjusted)[: len(MONTH_SEQUENCE)]
+    if len(values) < len(MONTH_SEQUENCE):
+        values.extend([0.0] * (len(MONTH_SEQUENCE) - len(values)))
+
+    new_df = sales_df.copy()
+    channel = (str(result.get("channel", "")).strip() or f"チャネル{len(new_df) + 1}")
+    product = (str(result.get("product", "")).strip() or "新規商品")
+    customers = float(result.get("customers_typical", 0.0) or 0.0)
+    unit_price_value = float(result.get("unit_price_typical", 0.0) or 0.0)
+    memo = str(result.get("memo", "Fermi推定から自動入力")).strip()
+    annual_min = float(result.get("annual_min", 0.0) or 0.0)
+    annual_typical = float(result.get("annual_typical_adjusted", sum(values)) or sum(values))
+    annual_max = float(result.get("annual_max", annual_typical) or annual_typical)
+
+    target_index = result.get("target_index")
+    if isinstance(target_index, int) and 0 <= target_index < len(new_df):
+        row_idx = target_index
+    else:
+        row_idx = len(new_df)
+        row_data = {col: 0.0 for col in MONTH_COLUMNS}
+        row_data.update({
+            "チャネル": channel,
+            "商品": product,
+            "想定顧客数": 0.0,
+            "客単価": 0.0,
+            "購入頻度(月)": 1.0,
+            "メモ": memo,
+            "年間売上(最低)": annual_min,
+            "年間売上(中央値)": annual_typical,
+            "年間売上(最高)": annual_max,
+        })
+        for idx, month in enumerate(MONTH_SEQUENCE):
+            row_data[f"月{month:02d}"] = float(values[idx])
+        new_df = pd.concat([new_df, pd.DataFrame([row_data])], ignore_index=True)
+        row_idx = len(new_df) - 1
+
+    new_df.at[row_idx, "チャネル"] = channel
+    new_df.at[row_idx, "商品"] = product
+    new_df.at[row_idx, "想定顧客数"] = customers
+    new_df.at[row_idx, "客単価"] = unit_price_value
+    new_df.at[row_idx, "購入頻度(月)"] = 1.0
+    new_df.at[row_idx, "メモ"] = memo
+    new_df.at[row_idx, "年間売上(最低)"] = annual_min
+    new_df.at[row_idx, "年間売上(中央値)"] = annual_typical
+    new_df.at[row_idx, "年間売上(最高)"] = annual_max
+
+    for idx, month in enumerate(MONTH_SEQUENCE):
+        new_df.at[row_idx, f"月{month:02d}"] = float(values[idx])
+
+    st.session_state[FERMI_RESULT_STATE_KEY] = None
+    return _standardize_sales_df(new_df)
+
+
+def _render_fermi_wizard(sales_df: pd.DataFrame, unit: str) -> None:
+    learning_state: Dict[str, object] = st.session_state.get("fermi_learning", {})
+    avg_ratio = float(learning_state.get("avg_ratio", 1.0) or 1.0)
+    history: List[Dict[str, object]] = learning_state.get("history", [])
+    expand_default = st.session_state.get("tutorial_mode", False) and not history
+
+    with st.expander("🧮 Fermi推定ウィザード", expanded=expand_default):
+        st.markdown(
+            "日次の来店数・客単価・営業日数を入力すると、年間売上の中央値/最低/最高レンジを推定します。"
+            " 学習済みの実績データがあれば中央値を自動補正します。"
+        )
+        options_map = {
+            f"{idx + 1}. {str(row.get('チャネル', ''))}/{str(row.get('商品', ''))}": idx
+            for idx, row in sales_df.iterrows()
+        }
+        option_labels = list(options_map.keys())
+        option_labels.append("新規行として追加")
+
+        with st.form("fermi_wizard_form"):
+            selection = st.selectbox("適用先", option_labels, key="fermi_target_selection")
+            target_index = options_map.get(selection)
+            channel_default = (
+                str(sales_df.loc[target_index, "チャネル"]) if target_index is not None else ""
+            )
+            product_default = (
+                str(sales_df.loc[target_index, "商品"]) if target_index is not None else ""
+            )
+            channel_value = st.text_input(
+                "チャネル名",
+                value=channel_default,
+                key="fermi_channel_input",
+                help="推定結果を反映するチャネル名。新規行を追加する場合は入力してください。",
+            )
+            product_value = st.text_input(
+                "商品・サービス名",
+                value=product_default,
+                key="fermi_product_input",
+            )
+            daily_min = st.number_input(
+                "1日の平均来店数 (最小)",
+                min_value=0.0,
+                step=1.0,
+                value=float(st.session_state.get("fermi_daily_min", 20.0)),
+                key="fermi_daily_min",
+            )
+            daily_typical = st.number_input(
+                "1日の平均来店数 (中央値)",
+                min_value=0.0,
+                step=1.0,
+                value=float(st.session_state.get("fermi_daily_typical", 40.0)),
+                key="fermi_daily_typical",
+            )
+            daily_max = st.number_input(
+                "1日の平均来店数 (最大)",
+                min_value=0.0,
+                step=1.0,
+                value=float(st.session_state.get("fermi_daily_max", 70.0)),
+                key="fermi_daily_max",
+            )
+            price_min = st.number_input(
+                "平均客単価 (最小)",
+                min_value=0.0,
+                step=100.0,
+                value=float(st.session_state.get("fermi_price_min", 2000.0)),
+                key="fermi_price_min",
+            )
+            price_typical = st.number_input(
+                "平均客単価 (中央値)",
+                min_value=0.0,
+                step=100.0,
+                value=float(st.session_state.get("fermi_price_typical", 3500.0)),
+                key="fermi_price_typical",
+            )
+            price_max = st.number_input(
+                "平均客単価 (最大)",
+                min_value=0.0,
+                step=100.0,
+                value=float(st.session_state.get("fermi_price_max", 5000.0)),
+                key="fermi_price_max",
+            )
+            days_min = st.number_input(
+                "営業日数/月 (最小)",
+                min_value=0,
+                max_value=31,
+                step=1,
+                value=int(st.session_state.get("fermi_days_min", 20)),
+                key="fermi_days_min",
+            )
+            days_typical = st.number_input(
+                "営業日数/月 (中央値)",
+                min_value=0,
+                max_value=31,
+                step=1,
+                value=int(st.session_state.get("fermi_days_typical", 24)),
+                key="fermi_days_typical",
+            )
+            days_max = st.number_input(
+                "営業日数/月 (最大)",
+                min_value=0,
+                max_value=31,
+                step=1,
+                value=int(st.session_state.get("fermi_days_max", 28)),
+                key="fermi_days_max",
+            )
+            seasonal_key = st.selectbox(
+                "季節性パターン",
+                list(FERMI_SEASONAL_PATTERNS.keys()),
+                index=0,
+                key="fermi_seasonal_key",
+            )
+            apply_learning = st.checkbox(
+                "実績から中央値を補正",
+                value=bool(history),
+                key="fermi_apply_learning",
+            )
+            submitted = st.form_submit_button("推定を計算", type="secondary")
+
+        if submitted:
+            daily_values = sorted([daily_min, daily_typical, daily_max])
+            price_values = sorted([price_min, price_typical, price_max])
+            day_values = sorted([float(days_min), float(days_typical), float(days_max)])
+            estimate = compute_fermi_estimate(
+                daily_visitors=(daily_values[0], daily_values[1], daily_values[2]),
+                unit_price=(price_values[0], price_values[1], price_values[2]),
+                business_days=(day_values[0], day_values[1], day_values[2]),
+                seasonal_key=seasonal_key,
+            )
+
+            ratio = avg_ratio if apply_learning else 1.0
+            adjusted_typical = estimate.typical_with_ratio(ratio)
+            annual_adjusted = sum(adjusted_typical)
+
+            metrics_cols = st.columns(3)
+            with metrics_cols[0]:
+                st.metric(
+                    "中央値 (年間)",
+                    format_amount_with_unit(Decimal(str(estimate.annual_typical)), "円"),
+                )
+            with metrics_cols[1]:
+                st.metric(
+                    "中央値 (補正後)",
+                    format_amount_with_unit(Decimal(str(annual_adjusted)), "円"),
+                    delta=f"x{ratio:.2f}",
+                )
+            with metrics_cols[2]:
+                st.metric(
+                    "レンジ幅",
+                    format_amount_with_unit(
+                        Decimal(str(estimate.annual_max - estimate.annual_min)), "円"
+                    ),
+                )
+
+            preview_df = pd.DataFrame(
+                {
+                    "月": [f"{month}月" for month in MONTH_SEQUENCE],
+                    "中央値": [float(value) for value in estimate.monthly],
+                    "中央値(補正)": [float(value) for value in adjusted_typical],
+                    "最低": [float(value) for value in estimate.monthly_min],
+                    "最高": [float(value) for value in estimate.monthly_max],
+                }
+            )
+            st.dataframe(
+                preview_df,
+                hide_index=True,
+                use_container_width=True,
+            )
+
+            st.session_state[FERMI_RESULT_STATE_KEY] = {
+                "target_index": target_index,
+                "channel": channel_value,
+                "product": product_value,
+                "monthly_typical": [float(value) for value in estimate.monthly],
+                "monthly_adjusted": [float(value) for value in adjusted_typical],
+                "annual_min": float(estimate.annual_min),
+                "annual_max": float(estimate.annual_max),
+                "annual_typical": float(estimate.annual_typical),
+                "annual_typical_adjusted": float(annual_adjusted),
+                "customers_typical": float(daily_values[1] * day_values[1]),
+                "unit_price_typical": float(price_values[1]),
+                "memo": f"Fermi推定({seasonal_key})",
+            }
+            st.success("推定結果をプレビューしました。『推定結果をテンプレートに適用』を押すと反映されます。")
+
+        if st.session_state.get(FERMI_RESULT_STATE_KEY):
+            if st.button("推定結果をテンプレートに適用", type="primary", key="fermi_apply_button"):
+                updated_df = _apply_fermi_result(sales_df)
+                st.session_state[SALES_TEMPLATE_STATE_KEY] = updated_df
+                st.toast("Fermi推定を売上テンプレートに反映しました。", icon="✅")
+                st.experimental_rerun()
+
+        if history:
+            st.caption(f"過去{len(history)}件の実績学習に基づく中央値補正係数: x{avg_ratio:.2f}")
+            history_rows: List[Dict[str, str]] = []
+            for entry in reversed(history):
+                plan_amount = Decimal(str(entry.get("plan", 0.0)))
+                actual_amount = Decimal(str(entry.get("actual", 0.0)))
+                diff_amount = Decimal(str(entry.get("diff", actual_amount - plan_amount)))
+                history_rows.append(
+                    {
+                        "記録日時": str(entry.get("timestamp", ""))[:16],
+                        "計画": format_amount_with_unit(plan_amount, "円"),
+                        "実績": format_amount_with_unit(actual_amount, "円"),
+                        "差異": format_amount_with_unit(diff_amount, "円"),
+                        "比率": f"x{float(entry.get('ratio', 0.0)):.2f}",
+                    }
+                )
+            history_df = pd.DataFrame(history_rows)
+            st.dataframe(history_df, hide_index=True, use_container_width=True)
+
+
 def _format_timestamp(value: object) -> str:
     if isinstance(value, datetime):
         return value.strftime("%Y-%m-%d %H:%M")
@@ -280,6 +691,12 @@ def _standardize_sales_df(df: pd.DataFrame) -> pd.DataFrame:
     if "チャネル" not in base.columns or "商品" not in base.columns:
         raise ValueError("テンプレートには『チャネル』『商品』列が必要です。")
     for column in ASSUMPTION_NUMERIC_COLUMNS:
+        if column not in base.columns:
+            base[column] = 0.0
+        base[column] = (
+            pd.to_numeric(base[column], errors="coerce").fillna(0.0).astype(float)
+        )
+    for column in ASSUMPTION_RANGE_COLUMNS:
         if column not in base.columns:
             base[column] = 0.0
         base[column] = (
@@ -434,6 +851,20 @@ def _sales_dataframe(data: Dict) -> pd.DataFrame:
             else:
                 value = Decimal("0")
             row[key] = float(value)
+        annual_total = sum((Decimal(str(row[f"月{m:02d}"])) for m in MONTH_SEQUENCE), start=Decimal("0"))
+        revenue_range = item.get("revenue_range") if isinstance(item, dict) else None
+        if isinstance(revenue_range, dict):
+            try:
+                range_obj = EstimateRange(**revenue_range)
+            except Exception:
+                range_obj = EstimateRange(minimum=annual_total, typical=annual_total, maximum=annual_total)
+        elif isinstance(revenue_range, EstimateRange):
+            range_obj = revenue_range
+        else:
+            range_obj = EstimateRange(minimum=annual_total, typical=annual_total, maximum=annual_total)
+        row["年間売上(最低)"] = float(range_obj.minimum)
+        row["年間売上(中央値)"] = float(range_obj.typical)
+        row["年間売上(最高)"] = float(range_obj.maximum)
         rows.append(row)
     if not rows:
         rows.append(
@@ -444,6 +875,9 @@ def _sales_dataframe(data: Dict) -> pd.DataFrame:
                 "客単価": 0.0,
                 "購入頻度(月)": 1.0,
                 "メモ": "",
+                "年間売上(最低)": 0.0,
+                "年間売上(中央値)": 0.0,
+                "年間売上(最高)": 0.0,
                 **{f"月{m:02d}": 0.0 for m in MONTH_SEQUENCE},
             }
         )
@@ -482,6 +916,10 @@ def _industry_sales_dataframe(template_key: str) -> pd.DataFrame:
         }
         for idx, month in enumerate(MONTH_SEQUENCE):
             row[f"月{month:02d}"] = monthly_amounts[idx]
+        annual_total = float(sum(monthly_amounts))
+        row["年間売上(最低)"] = annual_total
+        row["年間売上(中央値)"] = annual_total
+        row["年間売上(最高)"] = annual_total
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -594,6 +1032,15 @@ tax_defaults = finance_raw.get("tax", {})
 settings_state: Dict[str, object] = st.session_state.get("finance_settings", {})
 unit = str(settings_state.get("unit", "百万円"))
 unit_factor = UNIT_FACTORS.get(unit, Decimal("1"))
+
+_ensure_cost_range_state(
+    costs_defaults.get("range_profiles", {}),
+    variable_defaults=variable_ratios,
+    fixed_defaults=fixed_costs,
+    noi_defaults=noi_defaults,
+    noe_defaults=noe_defaults,
+    unit_factor=unit_factor,
+)
 
 
 def _set_wizard_step(step_id: str) -> None:
@@ -709,6 +1156,18 @@ st.session_state.setdefault("tax_dividend_ratio", float(tax_defaults.get("divide
 
 current_step = str(st.session_state[INPUT_WIZARD_STEP_KEY])
 
+capex_editor_snapshot = pd.DataFrame(st.session_state.get("capex_editor_df", capex_defaults_df))
+loan_editor_snapshot = pd.DataFrame(st.session_state.get("loan_editor_df", loan_defaults_df))
+
+completion_flags = _calculate_completion_flags(
+    context_state=context_state,
+    sales_df=sales_df,
+    variable_defaults=variable_ratios,
+    fixed_defaults=fixed_costs,
+    capex_df=capex_editor_snapshot,
+    loan_df=loan_editor_snapshot,
+)
+
 st.title("🧾 データ入力ハブ")
 st.caption("ウィザード形式で売上から投資までを順番に整理します。保存すると全ページに反映されます。")
 
@@ -739,8 +1198,10 @@ with st.sidebar.expander("用語集", expanded=False):
 st.sidebar.info("入力途中でもステップを行き来できます。最終ステップで保存すると数値が確定します。")
 
 step_index = _render_stepper(current_step)
+_render_completion_checklist(completion_flags)
 
 if current_step == "context":
+    _maybe_show_tutorial("context", "顧客・自社・競合の視点を整理して仮説の前提を固めましょう。")
     st.header("STEP 1｜ビジネスモデル整理")
     st.markdown("3C分析とビジネスモデルキャンバスの主要要素を整理して、数値入力の前提を明確にしましょう。")
     st.info("顧客(Customer)・自社(Company)・競合(Competitor)の視点を1〜2行でも言語化することで、収益モデルの仮定がぶれにくくなります。")
@@ -808,6 +1269,7 @@ if current_step == "context":
     st.caption("※ 記入した内容はウィザード内で保持され、事業計画書作成時の定性情報として活用できます。")
 
 elif current_step == "sales":
+    _maybe_show_tutorial("sales", "客数×単価×頻度の分解で売上を見積もると改善ポイントが見えます。")
     st.header("STEP 2｜売上計画")
     st.markdown("顧客セグメントとチャネルの整理結果をもとに、チャネル×商品×月で売上を見積もります。")
     st.info(
@@ -818,6 +1280,7 @@ elif current_step == "sales":
     main_col, guide_col = st.columns([4, 1], gap="large")
 
     with main_col:
+        _render_fermi_wizard(sales_df, unit)
         st.markdown("#### 業種テンプレート & オプション")
         template_options = ["—"] + list(INDUSTRY_TEMPLATES.keys())
         stored_template_key = str(st.session_state.get(INDUSTRY_TEMPLATE_KEY, ""))
@@ -1142,6 +1605,11 @@ elif current_step == "sales":
                         }
                         st.session_state["external_actuals"] = actuals_state
 
+                        plan_total_decimal = _calculate_sales_total(
+                            _standardize_sales_df(pd.DataFrame(st.session_state[SALES_TEMPLATE_STATE_KEY]))
+                        )
+                        _update_fermi_learning(plan_total_decimal, Decimal(str(total_amount)))
+
                         if apply_to_plan and target_metric == "売上":
                             new_row = {
                                 "チャネル": f"{source_type}連携",
@@ -1178,6 +1646,7 @@ elif current_step == "sales":
         _render_sales_guide_panel()
 
 elif current_step == "costs":
+    _maybe_show_tutorial("costs", "原価率と固定費のレンジを設定し、利益感度を把握しましょう。")
     st.header("STEP 3｜原価・経費")
     st.markdown("売上に対する変動費（原価）と固定費、営業外項目を入力し、粗利益率の前提を確認します。")
     st.info("粗利益率＝(売上−売上原価)÷売上。製造業では30%を超えると優良とされます。目標レンジと比較しながら設定しましょう。")
@@ -1240,6 +1709,78 @@ elif current_step == "costs":
                 help=help_text,
             )
 
+    cost_range_state: Dict[str, Dict[str, float]] = st.session_state.get(COST_RANGE_STATE_KEY, {})
+    with st.expander("🔀 レンジ入力 (原価・費用の幅)", expanded=False):
+        st.caption("最小・中央値・最大の3点を入力すると、分析ページで感度レンジを参照できます。")
+
+        variable_rows = []
+        for code, label, _ in VARIABLE_RATIO_FIELDS:
+            profile = cost_range_state.get(code, {})
+            variable_rows.append(
+                {
+                    "コード": code,
+                    "項目": label,
+                    "最小": float(profile.get("min", variable_inputs.get(code, 0.0))),
+                    "中央値": float(profile.get("typical", variable_inputs.get(code, 0.0))),
+                    "最大": float(profile.get("max", variable_inputs.get(code, 0.0))),
+                }
+            )
+        variable_range_df = pd.DataFrame(variable_rows)
+        variable_edited = st.data_editor(
+            variable_range_df,
+            hide_index=True,
+            column_config={
+                "コード": st.column_config.TextColumn("コード", disabled=True),
+                "項目": st.column_config.TextColumn("項目", disabled=True),
+                "最小": st.column_config.NumberColumn("最小", min_value=0.0, max_value=1.0, format="%.2f"),
+                "中央値": st.column_config.NumberColumn("中央値", min_value=0.0, max_value=1.0, format="%.2f"),
+                "最大": st.column_config.NumberColumn("最大", min_value=0.0, max_value=1.0, format="%.2f"),
+            },
+            key="cost_variable_range_editor",
+            **use_container_width_kwargs(st.data_editor),
+        )
+        _update_cost_range_state_from_editor(variable_edited)
+
+        fixed_rows = []
+        for code, label, _ in FIXED_COST_FIELDS:
+            profile = cost_range_state.get(code, {})
+            fixed_rows.append(
+                {
+                    "コード": code,
+                    "項目": label,
+                    "最小": float(profile.get("min", fixed_inputs.get(code, 0.0))),
+                    "中央値": float(profile.get("typical", fixed_inputs.get(code, 0.0))),
+                    "最大": float(profile.get("max", fixed_inputs.get(code, 0.0))),
+                }
+            )
+        for code, label, _ in NOI_FIELDS + NOE_FIELDS:
+            profile = cost_range_state.get(code, {})
+            base_value = noi_inputs.get(code) if code in noi_inputs else noe_inputs.get(code, 0.0)
+            fixed_rows.append(
+                {
+                    "コード": code,
+                    "項目": label,
+                    "最小": float(profile.get("min", base_value)),
+                    "中央値": float(profile.get("typical", base_value)),
+                    "最大": float(profile.get("max", base_value)),
+                }
+            )
+        fixed_range_df = pd.DataFrame(fixed_rows)
+        fixed_edited = st.data_editor(
+            fixed_range_df,
+            hide_index=True,
+            column_config={
+                "コード": st.column_config.TextColumn("コード", disabled=True),
+                "項目": st.column_config.TextColumn("項目", disabled=True),
+                "最小": st.column_config.NumberColumn("最小", min_value=0.0, format="¥%d"),
+                "中央値": st.column_config.NumberColumn("中央値", min_value=0.0, format="¥%d"),
+                "最大": st.column_config.NumberColumn("最大", min_value=0.0, format="¥%d"),
+            },
+            key="cost_fixed_range_editor",
+            **use_container_width_kwargs(st.data_editor),
+        )
+        _update_cost_range_state_from_editor(fixed_edited)
+
     if any(err.field.startswith("costs") for err in validation_errors):
         messages = "<br/>".join(
             err.message for err in validation_errors if err.field.startswith("costs")
@@ -1247,6 +1788,7 @@ elif current_step == "costs":
         st.markdown(f"<div class='field-error'>{messages}</div>", unsafe_allow_html=True)
 
 elif current_step == "invest":
+    _maybe_show_tutorial("invest", "投資と借入のタイミングを整理すると資金繰りが読みやすくなります。")
     st.header("STEP 4｜投資・借入")
     st.markdown("成長投資や資金調達のスケジュールを設定します。金額・開始月・耐用年数を明確にしましょう。")
     st.info("投資額は税込・税抜どちらでも構いませんが、他データと整合するよう統一します。借入は金利・返済期間・開始月をセットで管理しましょう。")
@@ -1347,6 +1889,7 @@ elif current_step == "invest":
         st.markdown(f"<div class='field-error'>{messages}</div>", unsafe_allow_html=True)
 
 elif current_step == "tax":
+    _maybe_show_tutorial("tax", "保存ボタンで計画を確定し、各ページへ反映させましょう。")
     st.header("STEP 5｜税制・保存")
     st.markdown("税率を確認し、これまでの入力内容を保存します。")
     st.info("法人税率・消費税率・配当性向は業種や制度により異なります。最新情報を確認しながら設定してください。")
@@ -1437,6 +1980,9 @@ elif current_step == "tax":
                 unit_price_val = Decimal(str(row.get("客単価", 0)))
                 frequency_val = Decimal(str(row.get("購入頻度(月)", 0)))
                 memo_val = str(row.get("メモ", "")).strip()
+                annual_min_val = Decimal(str(row.get("年間売上(最低)", 0)))
+                annual_typical_val = Decimal(str(row.get("年間売上(中央値)", 0)))
+                annual_max_val = Decimal(str(row.get("年間売上(最高)", 0)))
                 sales_data["items"].append(
                     {
                         "channel": str(row.get("チャネル", "")).strip() or "未設定",
@@ -1446,8 +1992,34 @@ elif current_step == "tax":
                         "unit_price": unit_price_val if unit_price_val > 0 else None,
                         "purchase_frequency": frequency_val if frequency_val > 0 else None,
                         "memo": memo_val or None,
+                        "revenue_range": {
+                            "minimum": annual_min_val,
+                            "typical": annual_typical_val if annual_typical_val > 0 else sum(monthly_amounts),
+                            "maximum": max(annual_max_val, annual_typical_val),
+                        },
                     }
                 )
+
+            cost_range_state = st.session_state.get(COST_RANGE_STATE_KEY, {})
+            range_profiles: Dict[str, Dict[str, Decimal]] = {}
+            for code, profile in cost_range_state.items():
+                min_val = Decimal(str(profile.get("min", 0.0)))
+                typ_val = Decimal(str(profile.get("typical", 0.0)))
+                max_val = Decimal(str(profile.get("max", 0.0)))
+                if code in VARIABLE_RATIO_CODES:
+                    divisor = Decimal("1")
+                else:
+                    divisor = unit_factor
+                    min_val *= divisor
+                    typ_val *= divisor
+                    max_val *= divisor
+                ordered = sorted([min_val, typ_val, max_val])
+                if any(value > Decimal("0") for value in ordered):
+                    range_profiles[code] = {
+                        "minimum": ordered[0],
+                        "typical": ordered[1],
+                        "maximum": ordered[2],
+                    }
 
             costs_data = {
                 "variable_ratios": {
@@ -1463,6 +2035,8 @@ elif current_step == "tax":
                     code: Decimal(str(value)) * unit_factor for code, value in costs_noe_inputs.items()
                 },
             }
+            if range_profiles:
+                costs_data["range_profiles"] = range_profiles
 
             capex_df = pd.DataFrame(st.session_state.get("capex_editor_df", capex_defaults_df))
             capex_data = {
@@ -1660,3 +2234,10 @@ elif current_step == "tax":
 
 st.session_state[BUSINESS_CONTEXT_KEY] = context_state
 _render_navigation(step_index)
+FERMI_RESULT_STATE_KEY = "fermi_last_estimate"
+COST_RANGE_STATE_KEY = "cost_range_profiles"
+
+VARIABLE_RATIO_CODES = {code for code, _, _ in VARIABLE_RATIO_FIELDS}
+FIXED_COST_CODES = {code for code, _, _ in FIXED_COST_FIELDS}
+NOI_CODES = {code for code, _, _ in NOI_FIELDS}
+NOE_CODES = {code for code, _, _ in NOE_FIELDS}

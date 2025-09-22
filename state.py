@@ -68,6 +68,9 @@ STATE_SPECS: Dict[str, StateSpec] = {
     ),
     "ui_font_scale": StateSpec(lambda: 1.0, (float, int), "アクセシビリティ用フォント倍率"),
     "ui_high_contrast": StateSpec(lambda: False, bool, "高コントラスト表示の有効化"),
+    "ui_color_scheme": StateSpec(lambda: "light", str, "ライト/ダークテーマ設定"),
+    "ui_color_blind": StateSpec(lambda: False, bool, "色覚多様性サポートの有効化"),
+    "ui_sidebar_compact": StateSpec(lambda: False, bool, "サイドバーのコンパクト表示"),
     "selected_industry_template": StateSpec(lambda: "", str, "選択された業種テンプレートキー"),
     "working_capital_profile": StateSpec(
         lambda: {"receivable_days": 45.0, "inventory_days": 30.0, "payable_days": 25.0},
@@ -77,6 +80,14 @@ STATE_SPECS: Dict[str, StateSpec] = {
     "custom_kpi_selection": StateSpec(list, list, "ユーザーが選択したKPIカード"),
     "industry_custom_metrics": StateSpec(dict, dict, "業種別KPI計算設定"),
     "external_actuals": StateSpec(dict, dict, "外部データから取り込んだ実績値"),
+    "fermi_learning": StateSpec(
+        lambda: {"history": [], "avg_ratio": 1.0},
+        dict,
+        "Fermi推定の学習履歴",
+    ),
+    "tutorial_mode": StateSpec(lambda: True, bool, "チュートリアルモードの有効/無効"),
+    "tutorial_shown_steps": StateSpec(lambda: set(), set, "チュートリアル表示済みステップ"),
+    "cost_range_profiles": StateSpec(dict, dict, "コスト推定レンジの保存領域"),
     "scenario_thresholds": StateSpec(
         lambda: {"var_limit": None, "dscr_floor": 1.2, "var_confidence": 0.95},
         dict,

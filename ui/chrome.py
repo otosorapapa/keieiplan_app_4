@@ -77,6 +77,32 @@ def render_app_header(
                     key="ui_high_contrast",
                     help="色のコントラストを強めて視認性を高めます。",
                 )
+                st.radio(
+                    "テーマ",
+                    options=["light", "dark"],
+                    index=0 if st.session_state.get("ui_color_scheme", "light") == "light" else 1,
+                    format_func=lambda value: "ライト" if value == "light" else "ダーク",
+                    key="ui_color_scheme",
+                    help="状況に合わせてライト/ダークテーマを切り替えます。",
+                )
+                st.toggle(
+                    "色覚サポート",
+                    value=bool(st.session_state.get("ui_color_blind", False)),
+                    key="ui_color_blind",
+                    help="色覚特性に配慮したカラーパレットに変更します。",
+                )
+                st.toggle(
+                    "サイドバーをコンパクト表示",
+                    value=bool(st.session_state.get("ui_sidebar_compact", False)),
+                    key="ui_sidebar_compact",
+                    help="左メニューをアイコン中心にして画面を広く使います。",
+                )
+                st.toggle(
+                    "チュートリアルモード",
+                    value=bool(st.session_state.get("tutorial_mode", True)),
+                    key="tutorial_mode",
+                    help="有効にすると各ステップでガイドがポップアップ表示されます。",
+                )
                 st.caption("設定は全ページで共有されます。")
         account_col = columns[3]
         with account_col:

@@ -40,6 +40,48 @@ class MonthlySeries(BaseModel):
         return {month: self.amounts[i] for i, month in enumerate(MONTH_SEQUENCE)}
 
 
+class EstimateRange(BaseModel):
+    """Triangular estimate capturing minimum/typical/maximum values."""
+
+    minimum: Decimal = Field(default=Decimal("0"))
+    typical: Decimal = Field(default=Decimal("0"))
+    maximum: Decimal = Field(default=Decimal("0"))
+
+    @field_validator("minimum", "typical", "maximum", mode="before")
+    @classmethod
+    def _coerce_decimal(cls, value: object) -> Decimal:
+        return Decimal(str(value))
+
+    @model_validator(mode="after")
+    def _ensure_order(self) -> "EstimateRange":
+        values = sorted([self.minimum, self.typical, self.maximum])
+        if values[0] < Decimal("0"):
+            raise ValueError("レンジは0以上の値で入力してください。")
+        self.minimum, self.typical, self.maximum = values
+        return self
+
+    def scaled(self, factor: Decimal) -> "EstimateRange":
+        scale = max(Decimal("0"), Decimal(str(factor)))
+        return EstimateRange(
+            minimum=self.minimum * scale,
+            typical=self.typical * scale,
+            maximum=self.maximum * scale,
+        )
+
+    def __add__(self, other: "EstimateRange") -> "EstimateRange":
+        if not isinstance(other, EstimateRange):  # pragma: no cover - defensive
+            raise TypeError("EstimateRange同士のみ加算できます。")
+        return EstimateRange(
+            minimum=self.minimum + other.minimum,
+            typical=self.typical + other.typical,
+            maximum=self.maximum + other.maximum,
+        )
+
+    @classmethod
+    def zero(cls) -> "EstimateRange":
+        return cls(minimum=Decimal("0"), typical=Decimal("0"), maximum=Decimal("0"))
+
+
 class SalesItem(BaseModel):
     """Monthly sales for a specific product sold through a channel."""
 
@@ -50,6 +92,7 @@ class SalesItem(BaseModel):
     unit_price: Optional[Decimal] = None
     purchase_frequency: Optional[Decimal] = None
     memo: Optional[str] = None
+    revenue_range: "EstimateRange | None" = None
 
     @field_validator("customers", "unit_price", "purchase_frequency", mode="before")
     @classmethod
@@ -57,6 +100,17 @@ class SalesItem(BaseModel):
         if value in (None, "", "NaN"):
             return None
         return Decimal(str(value))
+
+    @field_validator("revenue_range", mode="before")
+    @classmethod
+    def _coerce_range(cls, value: object) -> "EstimateRange | None":
+        if value in (None, "", {}):
+            return None
+        if isinstance(value, EstimateRange):
+            return value
+        if isinstance(value, dict):
+            return EstimateRange(**value)
+        raise TypeError("売上レンジは辞書形式で指定してください。")
 
     @property
     def transactions(self) -> Decimal:
@@ -80,6 +134,7 @@ class SalesItem(BaseModel):
             "memo": self.memo,
             "annual_sales": self.annual_total,
             "transactions": self.transactions,
+            "revenue_range": self.revenue_range.model_dump() if self.revenue_range else None,
         }
 
 
@@ -112,6 +167,9 @@ class SalesPlan(BaseModel):
         total_transactions = Decimal("0")
         weighted_price = Decimal("0")
         weighted_frequency = Decimal("0")
+        range_min = Decimal("0")
+        range_typical = Decimal("0")
+        range_max = Decimal("0")
 
         for item in self.items:
             annual_sales = item.annual_total
@@ -126,6 +184,10 @@ class SalesPlan(BaseModel):
                 weighted_price += unit_price * transactions
             if frequency > 0 and customers > 0:
                 weighted_frequency += frequency * customers
+            if item.revenue_range:
+                range_min += item.revenue_range.minimum
+                range_typical += item.revenue_range.typical
+                range_max += item.revenue_range.maximum
 
         avg_unit_price = (
             weighted_price / total_transactions if total_transactions > 0 else Decimal("0")
@@ -140,6 +202,9 @@ class SalesPlan(BaseModel):
             "total_transactions": total_transactions,
             "avg_unit_price": avg_unit_price,
             "avg_frequency": avg_frequency,
+            "range_min_total": range_min,
+            "range_typical_total": range_typical,
+            "range_max_total": range_max,
         }
 
 
@@ -151,6 +216,7 @@ class CostPlan(BaseModel):
     gross_linked_ratios: Dict[str, Decimal] = Field(default_factory=dict)
     non_operating_income: Dict[str, Decimal] = Field(default_factory=dict)
     non_operating_expenses: Dict[str, Decimal] = Field(default_factory=dict)
+    range_profiles: Dict[str, "EstimateRange"] = Field(default_factory=dict)
 
     @field_validator("variable_ratios", "gross_linked_ratios", mode="before")
     @classmethod
@@ -167,6 +233,23 @@ class CostPlan(BaseModel):
         if value is None:
             return {}
         return {str(k): Decimal(str(v)) for k, v in value.items()}
+
+    @field_validator("range_profiles", mode="before")
+    @classmethod
+    def _coerce_range_profiles(
+        cls, value: Dict[str, object] | None
+    ) -> Dict[str, "EstimateRange"]:
+        if value is None:
+            return {}
+        coerced: Dict[str, EstimateRange] = {}
+        for key, payload in value.items():
+            if isinstance(payload, EstimateRange):
+                coerced[str(key)] = payload
+            elif isinstance(payload, dict):
+                coerced[str(key)] = EstimateRange(**payload)
+            else:  # pragma: no cover - defensive
+                raise TypeError("レンジ情報は辞書形式で指定してください。")
+        return coerced
 
     @model_validator(mode="after")
     def _check_ranges(self) -> "CostPlan":
@@ -186,6 +269,34 @@ class CostPlan(BaseModel):
                 if amount < Decimal("0"):
                     raise ValueError(f"{label} の '{code}' は0以上の金額を入力してください。")
         return self
+
+    def aggregate_range_totals(self, total_sales: Decimal) -> Dict[str, EstimateRange]:
+        """Summarise range profiles into variable, fixed and non-operating buckets."""
+
+        try:
+            sales_total = Decimal(str(total_sales))
+        except Exception:  # pragma: no cover - defensive
+            sales_total = Decimal("0")
+        if sales_total < 0:
+            sales_total = Decimal("0")
+
+        variable_range = EstimateRange.zero()
+        fixed_range = EstimateRange.zero()
+        non_operating_range = EstimateRange.zero()
+
+        for code, profile in self.range_profiles.items():
+            if code.startswith("COGS"):
+                variable_range = variable_range + profile.scaled(sales_total)
+            elif code.startswith("OPEX"):
+                fixed_range = fixed_range + profile
+            elif code.startswith(("NOI", "NOE")):
+                non_operating_range = non_operating_range + profile
+
+        return {
+            "variable": variable_range,
+            "fixed": fixed_range,
+            "non_operating": non_operating_range,
+        }
 
 
 class CapexItem(BaseModel):
