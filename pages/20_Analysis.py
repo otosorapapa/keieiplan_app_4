@@ -18,10 +18,10 @@ from calc import (
     plan_from_models,
     summarize_plan_metrics,
 )
-from formatting import format_amount_with_unit, format_ratio
+from formatting import UNIT_FACTORS, format_amount_with_unit, format_ratio
 from state import ensure_session_defaults, load_finance_bundle
 from models import INDUSTRY_TEMPLATES, CapexPlan, LoanSchedule
-from theme import THEME_COLORS, inject_theme
+from theme import COLOR_BLIND_COLORS, THEME_COLORS, inject_theme
 from ui.components import MetricCard, render_metric_cards
 from ui.streamlit_compat import use_container_width_kwargs
 
@@ -34,14 +34,16 @@ PLOTLY_DOWNLOAD_OPTIONS = {
     "scale": 2,
 }
 
-ACCESSIBLE_PALETTE = [
-    THEME_COLORS["chart_blue"],
-    THEME_COLORS["chart_orange"],
-    THEME_COLORS["chart_green"],
-    THEME_COLORS["chart_purple"],
-    "#8c564b",
-    "#e377c2",
-]
+def _accessible_palette() -> List[str]:
+    palette_source = COLOR_BLIND_COLORS if st.session_state.get("ui_color_blind", False) else THEME_COLORS
+    return [
+        palette_source["chart_blue"],
+        palette_source["chart_orange"],
+        palette_source["chart_green"],
+        palette_source["chart_purple"],
+        "#8c564b",
+        "#e377c2",
+    ]
 
 
 def plotly_download_config(name: str) -> Dict[str, object]:
@@ -322,6 +324,7 @@ settings_state: Dict[str, object] = st.session_state.get("finance_settings", {})
 unit = str(settings_state.get("unit", "百万円"))
 fte = Decimal(str(settings_state.get("fte", 20)))
 fiscal_year = int(settings_state.get("fiscal_year", 2025))
+unit_factor = UNIT_FACTORS.get(unit, Decimal("1"))
 
 bundle, has_custom_inputs = load_finance_bundle()
 if not has_custom_inputs:
@@ -340,6 +343,7 @@ plan_cfg = plan_from_models(
 amounts = compute(plan_cfg)
 metrics = summarize_plan_metrics(amounts)
 working_capital_profile = st.session_state.get("working_capital_profile", {})
+palette = _accessible_palette()
 bs_data = generate_balance_sheet(
     amounts,
     bundle.capex,
@@ -351,6 +355,14 @@ cf_data = generate_cash_flow(amounts, bundle.capex, bundle.loans, bundle.tax)
 sales_summary = bundle.sales.assumption_summary()
 capex_schedule = _monthly_capex_schedule(bundle.capex)
 interest_schedule = _monthly_interest_schedule(bundle.loans)
+plan_sales_total = Decimal(amounts.get("REV", Decimal("0")))
+sales_range_min = Decimal(sales_summary.get("range_min_total", Decimal("0")))
+sales_range_typical = Decimal(sales_summary.get("range_typical_total", Decimal("0")))
+sales_range_max = Decimal(sales_summary.get("range_max_total", Decimal("0")))
+cost_range_totals = bundle.costs.aggregate_range_totals(plan_sales_total)
+variable_cost_range = cost_range_totals["variable"]
+fixed_cost_range = cost_range_totals["fixed"]
+non_operating_range = cost_range_totals["non_operating"]
 
 plan_items_serialized = {
     code: {
@@ -682,6 +694,60 @@ with kpi_tab:
         f"買掛 {bs_metrics.get('payable_days', Decimal('0'))}日"
     )
 
+    range_entries = [
+        ("売上高", sales_range_min, sales_range_typical, sales_range_max),
+        ("変動費", variable_cost_range.minimum, variable_cost_range.typical, variable_cost_range.maximum),
+        ("固定費", fixed_cost_range.minimum, fixed_cost_range.typical, fixed_cost_range.maximum),
+        (
+            "営業外",
+            non_operating_range.minimum,
+            non_operating_range.typical,
+            non_operating_range.maximum,
+        ),
+    ]
+    range_entries = [
+        entry for entry in range_entries if any(value > Decimal("0") for value in entry[1:])
+    ]
+    if range_entries:
+        st.markdown("#### 推定レンジの可視化")
+        range_fig = go.Figure()
+        for idx, (label, minimum, typical, maximum) in enumerate(range_entries):
+            upper = float((maximum - typical) / unit_factor) if maximum > typical else 0.0
+            lower = float((typical - minimum) / unit_factor) if typical > minimum else 0.0
+            range_fig.add_trace(
+                go.Bar(
+                    name=label,
+                    x=[label],
+                    y=[float(typical / unit_factor)],
+                    marker=dict(color=palette[idx % len(palette)]),
+                    error_y=dict(type="data", array=[upper], arrayminus=[lower], visible=True),
+                )
+            )
+        range_fig.update_layout(
+            template="plotly_white",
+            showlegend=False,
+            title="中央値と上下レンジ",
+            yaxis_title=f"金額 ({unit})",
+        )
+        st.plotly_chart(
+            range_fig,
+            use_container_width=True,
+            config=plotly_download_config("estimate_ranges"),
+        )
+
+        range_table = pd.DataFrame(
+            {
+                "項目": [label for label, *_ in range_entries],
+                "最低": [format_amount_with_unit(minimum, unit) for _, minimum, _, _ in range_entries],
+                "中央値": [
+                    format_amount_with_unit(typical, unit) for _, _, typical, _ in range_entries
+                ],
+                "最高": [format_amount_with_unit(maximum, unit) for _, _, _, maximum in range_entries],
+            }
+        )
+        st.dataframe(range_table, hide_index=True, use_container_width=True)
+        st.caption("レンジはFermi推定およびレンジ入力値を基に算出しています。")
+
     financial_cards = [
         MetricCard(
             icon="📊",
@@ -746,7 +812,7 @@ with kpi_tab:
             x=monthly_pl_df['month'],
             y=monthly_pl_df['売上原価'],
             marker=dict(
-                color=ACCESSIBLE_PALETTE[1],
+                color=palette[1],
                 pattern=dict(shape='/', fgcolor='rgba(0,0,0,0.15)'),
             ),
             hovertemplate='月=%{x}<br>売上原価=¥%{y:,.0f}<extra></extra>',
@@ -758,7 +824,7 @@ with kpi_tab:
             x=monthly_pl_df['month'],
             y=monthly_pl_df['販管費'],
             marker=dict(
-                color=ACCESSIBLE_PALETTE[3],
+                color=palette[3],
                 pattern=dict(shape='x', fgcolor='rgba(0,0,0,0.15)'),
             ),
             hovertemplate='月=%{x}<br>販管費=¥%{y:,.0f}<extra></extra>',
@@ -770,7 +836,7 @@ with kpi_tab:
             x=monthly_pl_df['month'],
             y=monthly_pl_df['営業利益'],
             marker=dict(
-                color=ACCESSIBLE_PALETTE[2],
+                color=palette[2],
                 pattern=dict(shape='.', fgcolor='rgba(0,0,0,0.12)'),
             ),
             hovertemplate='月=%{x}<br>営業利益=¥%{y:,.0f}<extra></extra>',
@@ -782,8 +848,8 @@ with kpi_tab:
             x=monthly_pl_df['month'],
             y=monthly_pl_df['売上高'],
             mode='lines+markers',
-            line=dict(color=ACCESSIBLE_PALETTE[0], width=3),
-            marker=dict(symbol='diamond-open', size=8, line=dict(color=ACCESSIBLE_PALETTE[0], width=2)),
+            line=dict(color=palette[0], width=3),
+            marker=dict(symbol='diamond-open', size=8, line=dict(color=palette[0], width=2)),
             hovertemplate='月=%{x}<br>売上高=¥%{y:,.0f}<extra></extra>',
         )
     )
@@ -818,8 +884,8 @@ with kpi_tab:
                 y=(monthly_pl_df['粗利率'] * 100).round(4),
                 mode='lines+markers',
                 name='粗利率',
-                line=dict(color=ACCESSIBLE_PALETTE[4], width=3),
-                marker=dict(symbol='circle', size=8, line=dict(width=1.5, color=ACCESSIBLE_PALETTE[4])),
+                line=dict(color=palette[4], width=3),
+                marker=dict(symbol='circle', size=8, line=dict(width=1.5, color=palette[4])),
                 hovertemplate='月=%{x}<br>粗利率=%{y:.1f}%<extra></extra>',
             )
         )
@@ -851,7 +917,7 @@ with kpi_tab:
                     textinfo='label+percent',
                     hovertemplate='%{label}: ¥%{value:,.0f}<extra></extra>',
                     marker=dict(
-                        colors=ACCESSIBLE_PALETTE[: len(cost_df)],
+                        colors=palette[: len(cost_df)],
                         line=dict(color='#FFFFFF', width=1.5),
                     ),
                 )
@@ -883,7 +949,7 @@ with kpi_tab:
             text=[f"¥{value:,.0f}" for value in fcf_values],
             hovertemplate='%{x}: ¥%{y:,.0f}<extra></extra>',
             connector=dict(line=dict(color=THEME_COLORS["neutral"], dash='dot')),
-            increasing=dict(marker=dict(color=ACCESSIBLE_PALETTE[2])),
+            increasing=dict(marker=dict(color=palette[2])),
             decreasing=dict(marker=dict(color=THEME_COLORS["negative"])),
             totals=dict(marker=dict(color=THEME_COLORS["primary"])),
         )
@@ -908,7 +974,7 @@ with kpi_tab:
                 x=monthly_cf_df['月'],
                 y=monthly_cf_df['営業CF'],
                 marker=dict(
-                    color=ACCESSIBLE_PALETTE[2],
+                    color=palette[2],
                     pattern=dict(shape='/', fgcolor='rgba(0,0,0,0.15)'),
                 ),
                 hovertemplate='月=%{x}<br>営業CF=¥%{y:,.0f}<extra></extra>',
@@ -932,7 +998,7 @@ with kpi_tab:
                 x=monthly_cf_df['月'],
                 y=monthly_cf_df['財務CF'],
                 marker=dict(
-                    color=ACCESSIBLE_PALETTE[0],
+                    color=palette[0],
                     pattern=dict(shape='\\', fgcolor='rgba(0,0,0,0.15)'),
                 ),
                 hovertemplate='月=%{x}<br>財務CF=¥%{y:,.0f}<extra></extra>',
@@ -944,8 +1010,8 @@ with kpi_tab:
                 x=monthly_cf_df['月'],
                 y=monthly_cf_df['累計キャッシュ'],
                 mode='lines+markers',
-                line=dict(color=ACCESSIBLE_PALETTE[5], width=3),
-                marker=dict(symbol='triangle-up', size=8, line=dict(color=ACCESSIBLE_PALETTE[5], width=1.5)),
+                line=dict(color=palette[5], width=3),
+                marker=dict(symbol='triangle-up', size=8, line=dict(color=palette[5], width=1.5)),
                 hovertemplate='月=%{x}<br>累計=¥%{y:,.0f}<extra></extra>',
                 yaxis='y2',
             )

@@ -26,6 +26,44 @@ THEME_COLORS: Dict[str, str] = {
     "chart_purple": "#9467bd",
 }
 
+DARK_THEME_COLORS: Dict[str, str] = {
+    "background": "#0F172A",
+    "surface": "#1E293B",
+    "surface_alt": "#24324D",
+    "primary": "#60A5FA",
+    "primary_light": "#93C5FD",
+    "accent": "#FBBF24",
+    "positive": "#34D399",
+    "positive_strong": "#059669",
+    "negative": "#F87171",
+    "neutral": "#64748B",
+    "text": "#F9FAFB",
+    "text_subtle": "#E2E8F0",
+    "chart_blue": "#60A5FA",
+    "chart_orange": "#F59E0B",
+    "chart_green": "#4ADE80",
+    "chart_purple": "#C4B5FD",
+}
+
+COLOR_BLIND_COLORS: Dict[str, str] = {
+    "background": "#F8FAFC",
+    "surface": "#FFFFFF",
+    "surface_alt": "#E2E8F0",
+    "primary": "#205493",
+    "primary_light": "#2F74C8",
+    "accent": "#F0B429",
+    "positive": "#2E8540",
+    "positive_strong": "#1B512D",
+    "negative": "#B94700",
+    "neutral": "#CBD5E1",
+    "text": "#1F2933",
+    "text_subtle": "#52606D",
+    "chart_blue": "#0173B2",
+    "chart_orange": "#DE8F05",
+    "chart_green": "#029E73",
+    "chart_purple": "#CC78BC",
+}
+
 HIGH_CONTRAST_COLORS: Dict[str, str] = {
     "background": "#0F172A",
     "surface": "#111827",
@@ -65,6 +103,7 @@ CUSTOM_STYLE_TEMPLATE = """
     --chart-orange: {chart_orange};
     --chart-green: {chart_green};
     --chart-purple: {chart_purple};
+    --sidebar-compact: {sidebar_compact};
 }}
 
 html, body, [data-testid="stAppViewContainer"] {{
@@ -78,10 +117,70 @@ html, body, [data-testid="stAppViewContainer"] {{
 [data-testid="stSidebar"] {{
     background: linear-gradient(180deg, var(--primary) 0%, var(--primary-light) 100%);
     color: #F7FAFC;
+    width: calc(18rem - 9rem * var(--sidebar-compact));
+    min-width: calc(16rem - 8rem * var(--sidebar-compact));
+    transition: width 0.35s ease;
 }}
 
 [data-testid="stSidebar"] * {{
     color: #F7FAFC !important;
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul {{
+    padding: 0.6rem 0.25rem 1.2rem 0.25rem;
+    display: grid;
+    gap: 0.25rem;
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a {{
+    display: flex;
+    align-items: center;
+    gap: calc(0.75rem * (1 - var(--sidebar-compact)) + 0.35rem);
+    padding: 0.55rem 0.9rem;
+    border-radius: 12px;
+    transition: background-color 0.25s ease, gap 0.2s ease;
+    font-weight: 600;
+    position: relative;
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a:hover {{
+    background-color: rgba(255, 255, 255, 0.14);
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a::before {{
+    font-size: 1.25rem;
+    margin-right: calc(0.35rem * (1 - var(--sidebar-compact)));
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] span {{
+    opacity: calc(1 - 0.92 * var(--sidebar-compact));
+    transition: opacity 0.25s ease;
+    white-space: nowrap;
+    pointer-events: none;
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Home"]::before {{
+    content: "🏠";
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Inputs"]::before {{
+    content: "🧾";
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Analysis"]::before {{
+    content: "📊";
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Scenarios"]::before {{
+    content: "🧮";
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Report"]::before {{
+    content: "📄";
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Settings"]::before {{
+    content: "⚙️";
 }}
 
 [data-testid="stSidebar"] button:focus-visible,
@@ -255,6 +354,19 @@ button:focus-visible {{
     font-size: calc(0.92rem * var(--base-font-scale));
 }}
 
+.wizard-checklist {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.4rem 0;
+}
+
+.wizard-checklist__item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: calc(0.92rem * var(--base-font-scale));
+}
+
 .visually-hidden {{
     position: absolute !important;
     width: 1px;
@@ -322,6 +434,9 @@ button[kind="primary"]:focus-visible {{
     .responsive-card-grid {{
         grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     }}
+    [data-testid="stSidebar"] {{
+        width: calc(17rem - 9rem * var(--sidebar-compact));
+    }}
 }}
 
 @media (max-width: 640px) {{
@@ -333,6 +448,15 @@ button[kind="primary"]:focus-visible {{
     }}
     .stTabs [role="tab"] {{
         padding: 0.6rem 0.9rem;
+    }}
+    .metric-card {{
+        padding: 1rem 1.1rem;
+    }}
+    .responsive-card-grid {{
+        grid-template-columns: 1fr;
+    }}
+    [data-testid="stSidebar"] {{
+        width: calc(16rem - 10rem * var(--sidebar-compact));
     }}
 }}
 
@@ -350,14 +474,32 @@ def _clamp_font_scale(value: float) -> float:
     return max(0.85, min(1.4, value))
 
 
-def _resolve_palette(high_contrast: bool) -> Dict[str, str]:
-    return HIGH_CONTRAST_COLORS if high_contrast else THEME_COLORS
+def _resolve_palette(*, color_scheme: str, high_contrast: bool, color_blind: bool) -> Dict[str, str]:
+    if high_contrast:
+        return HIGH_CONTRAST_COLORS
+    if color_scheme == "dark":
+        return DARK_THEME_COLORS
+    if color_blind:
+        return COLOR_BLIND_COLORS
+    return THEME_COLORS
 
 
-def build_custom_style(*, font_scale: float = 1.0, high_contrast: bool = False) -> str:
-    palette = _resolve_palette(high_contrast)
+def build_custom_style(
+    *,
+    font_scale: float = 1.0,
+    high_contrast: bool = False,
+    color_scheme: str = "light",
+    color_blind: bool = False,
+    sidebar_compact: bool = False,
+) -> str:
+    palette = _resolve_palette(
+        color_scheme=color_scheme,
+        high_contrast=high_contrast,
+        color_blind=color_blind,
+    )
     return CUSTOM_STYLE_TEMPLATE.format(
         font_scale=f"{_clamp_font_scale(font_scale):.2f}",
+        sidebar_compact="1" if sidebar_compact else "0",
         **palette,
     )
 
@@ -367,8 +509,27 @@ def inject_theme() -> None:
 
     font_scale = float(st.session_state.get("ui_font_scale", 1.0))
     high_contrast = bool(st.session_state.get("ui_high_contrast", False))
-    st.markdown(build_custom_style(font_scale=font_scale, high_contrast=high_contrast), unsafe_allow_html=True)
+    color_scheme = str(st.session_state.get("ui_color_scheme", "light"))
+    color_blind = bool(st.session_state.get("ui_color_blind", False))
+    sidebar_compact = bool(st.session_state.get("ui_sidebar_compact", False))
+    st.markdown(
+        build_custom_style(
+            font_scale=font_scale,
+            high_contrast=high_contrast,
+            color_scheme=color_scheme,
+            color_blind=color_blind,
+            sidebar_compact=sidebar_compact,
+        ),
+        unsafe_allow_html=True,
+    )
     enforce_https()
 
 
-__all__ = ["THEME_COLORS", "HIGH_CONTRAST_COLORS", "build_custom_style", "inject_theme"]
+__all__ = [
+    "THEME_COLORS",
+    "HIGH_CONTRAST_COLORS",
+    "DARK_THEME_COLORS",
+    "COLOR_BLIND_COLORS",
+    "build_custom_style",
+    "inject_theme",
+]
