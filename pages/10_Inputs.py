@@ -78,6 +78,9 @@ INPUT_WIZARD_STEP_KEY = "input_wizard_step"
 BUSINESS_CONTEXT_KEY = "business_context"
 INDUSTRY_TEMPLATE_KEY = "selected_industry_template"
 
+FERMI_RESULT_STATE_KEY = "fermi_last_estimate"
+COST_RANGE_STATE_KEY = "cost_range_profiles"
+
 WIZARD_STEPS = [
     {
         "id": "context",
@@ -668,6 +671,11 @@ NOE_FIELDS = [
         "雑損失や為替差損など一時的な費用。発生条件をメモすると再計算に便利です。",
     ),
 ]
+
+VARIABLE_RATIO_CODES = {code for code, _, _ in VARIABLE_RATIO_FIELDS}
+FIXED_COST_CODES = {code for code, _, _ in FIXED_COST_FIELDS}
+NOI_CODES = {code for code, _, _ in NOI_FIELDS}
+NOE_CODES = {code for code, _, _ in NOE_FIELDS}
 
 TAX_FIELD_META = {
     "corporate": "法人税率＝課税所得にかかる税率。中小企業は約30%が目安です。",
@@ -2234,10 +2242,3 @@ elif current_step == "tax":
 
 st.session_state[BUSINESS_CONTEXT_KEY] = context_state
 _render_navigation(step_index)
-FERMI_RESULT_STATE_KEY = "fermi_last_estimate"
-COST_RANGE_STATE_KEY = "cost_range_profiles"
-
-VARIABLE_RATIO_CODES = {code for code, _, _ in VARIABLE_RATIO_FIELDS}
-FIXED_COST_CODES = {code for code, _, _ in FIXED_COST_FIELDS}
-NOI_CODES = {code for code, _, _ in NOI_FIELDS}
-NOE_CODES = {code for code, _, _ in NOE_FIELDS}
