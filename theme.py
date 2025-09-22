@@ -354,18 +354,18 @@ button:focus-visible {{
     font-size: calc(0.92rem * var(--base-font-scale));
 }}
 
-.wizard-checklist {
+.wizard-checklist {{
     display: grid;
     gap: 0.35rem;
     padding: 0.4rem 0;
-}
+}}
 
-.wizard-checklist__item {
+.wizard-checklist__item {{
     display: flex;
     align-items: center;
     gap: 0.4rem;
     font-size: calc(0.92rem * var(--base-font-scale));
-}
+}}
 
 .visually-hidden {{
     position: absolute !important;
