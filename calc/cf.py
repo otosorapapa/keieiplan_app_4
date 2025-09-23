@@ -114,7 +114,8 @@ def generate_cash_flow(
 
     ordinary_income = Decimal(pl_amounts.get("ORD", Decimal("0")))
     depreciation = Decimal(pl_amounts.get("OPEX_DEP", Decimal("0")))
-    taxes = tax.effective_tax(ordinary_income)
+    income_tax_breakdown = tax.income_tax_components(ordinary_income)
+    taxes = income_tax_breakdown["total"]
 
     net_income = ordinary_income - taxes
     operating_cf = ordinary_income + depreciation - taxes
@@ -153,6 +154,7 @@ def generate_cash_flow(
         "税引後利益": net_income,
         "減価償却": depreciation,
         "営業キャッシュフロー（利払前）": operating_cf + interest_total_first_year,
+        "税金内訳": income_tax_breakdown,
         "loan_schedule": loan_schedule,
         "capex_schedule": capex_schedule,
         "investment_metrics": {

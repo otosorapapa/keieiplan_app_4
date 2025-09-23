@@ -263,7 +263,9 @@ def build_fcf_steps(
     del loans_data  # 不要だがインターフェイスを合わせる
     ebit = _to_decimal(amounts_data.get("OP", "0"))
     corporate_rate = _to_decimal(tax_data.get("corporate_tax_rate", "0"))
-    taxes = ebit * corporate_rate if ebit > 0 else Decimal("0")
+    business_rate = _to_decimal(tax_data.get("business_tax_rate", "0"))
+    total_rate = corporate_rate + business_rate
+    taxes = ebit * total_rate if ebit > 0 else Decimal("0")
     depreciation = _to_decimal(amounts_data.get("OPEX_DEP", "0"))
     working_capital = Decimal("0")
     capex_total = sum(
@@ -428,7 +430,7 @@ monthly_noi = non_operating_income_total / Decimal("12") if non_operating_income
 monthly_other_noe = (
     other_non_operating_expense_total / Decimal("12") if other_non_operating_expense_total else Decimal("0")
 )
-tax_rate = Decimal(bundle.tax.corporate_tax_rate)
+tax_policy = bundle.tax
 
 monthly_cf_entries: List[Dict[str, Decimal]] = []
 running_cash = Decimal("0")
@@ -438,7 +440,8 @@ for idx, row in monthly_pl_df.iterrows():
     interest_month = interest_schedule.get(month_index, Decimal("0"))
     monthly_noe = monthly_other_noe + interest_month
     ordinary_income_month = operating_profit + monthly_noi - monthly_noe
-    taxes_month = ordinary_income_month * tax_rate if ordinary_income_month > 0 else Decimal("0")
+    tax_components_month = tax_policy.income_tax_components(ordinary_income_month)
+    taxes_month = tax_components_month["total"]
     operating_cf_month = ordinary_income_month + monthly_depreciation - taxes_month
     investing_cf_month = -capex_schedule.get(month_index, Decimal("0"))
     financing_cf_month = -principal_schedule.get(month_index, Decimal("0"))

@@ -526,11 +526,16 @@ class LoanPayment:
 
 class TaxPolicy(BaseModel):
     corporate_tax_rate: Decimal = Field(default=Decimal("0.30"))
+    business_tax_rate: Decimal = Field(default=Decimal("0.05"))
     consumption_tax_rate: Decimal = Field(default=Decimal("0.10"))
     dividend_payout_ratio: Decimal = Field(default=Decimal("0.0"))
 
     @field_validator(
-        "corporate_tax_rate", "consumption_tax_rate", "dividend_payout_ratio", mode="before"
+        "corporate_tax_rate",
+        "business_tax_rate",
+        "consumption_tax_rate",
+        "dividend_payout_ratio",
+        mode="before",
     )
     @classmethod
     def _coerce_rate(cls, value: Decimal) -> Decimal:
@@ -541,6 +546,8 @@ class TaxPolicy(BaseModel):
     def _validate_ranges(self) -> "TaxPolicy":
         if not Decimal("0") <= self.corporate_tax_rate <= Decimal("0.55"):
             raise ValueError("法人税率は0%〜55%の範囲で設定してください。")
+        if not Decimal("0") <= self.business_tax_rate <= Decimal("0.15"):
+            raise ValueError("事業税率は0%〜15%の範囲で設定してください。")
         if not Decimal("0") <= self.consumption_tax_rate <= Decimal("0.20"):
             raise ValueError("消費税率は0%〜20%の範囲で設定してください。")
         if not Decimal("0") <= self.dividend_payout_ratio <= Decimal("1"):
@@ -548,9 +555,30 @@ class TaxPolicy(BaseModel):
         return self
 
     def effective_tax(self, ordinary_income: Decimal) -> Decimal:
-        if ordinary_income <= 0:
-            return Decimal("0")
-        return ordinary_income * self.corporate_tax_rate
+        breakdown = self.income_tax_components(ordinary_income)
+        return breakdown["total"]
+
+    def income_tax_components(self, ordinary_income: Decimal) -> Dict[str, Decimal]:
+        taxable = Decimal(str(ordinary_income))
+        if taxable <= 0:
+            zero = Decimal("0")
+            return {"corporate": zero, "business": zero, "total": zero}
+        corporate = taxable * self.corporate_tax_rate
+        business = taxable * self.business_tax_rate
+        return {"corporate": corporate, "business": business, "total": corporate + business}
+
+    def consumption_tax_balance(
+        self, taxable_sales: Decimal, deductible_purchases: Decimal
+    ) -> Dict[str, Decimal]:
+        rate = self.consumption_tax_rate
+        if rate <= Decimal("0"):
+            zero = Decimal("0")
+            return {"output": zero, "input": zero, "net": zero}
+        sales = max(Decimal("0"), Decimal(str(taxable_sales)))
+        purchases = max(Decimal("0"), Decimal(str(deductible_purchases)))
+        output_tax = sales * rate
+        input_tax = purchases * rate
+        return {"output": output_tax, "input": input_tax, "net": output_tax - input_tax}
 
     def projected_dividend(self, net_income: Decimal) -> Decimal:
         if net_income <= 0:
