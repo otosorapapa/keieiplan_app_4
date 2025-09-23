@@ -1,7 +1,7 @@
 """Analytics page showing KPI dashboard, break-even analysis and cash flow."""
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Tuple, Mapping
 
 import numpy as np
@@ -1388,7 +1388,23 @@ with be_tab:
 
 with cash_tab:
     st.subheader("キャッシュフロー")
-    cf_rows = [{"区分": key, "金額": float(value)} for key, value in cf_data.items()]
+    cf_rows = []
+    for key, value in cf_data.items():
+        amount: float | None
+        if isinstance(value, Decimal):
+            amount = float(value)
+        elif isinstance(value, (int, float)):
+            amount = float(value)
+        elif isinstance(value, str):
+            try:
+                amount = float(Decimal(value))
+            except (InvalidOperation, ValueError):
+                amount = None
+        else:
+            amount = None
+
+        if amount is not None:
+            cf_rows.append({"区分": key, "金額": amount})
     cf_df = pd.DataFrame(cf_rows)
     st.dataframe(
         cf_df,
