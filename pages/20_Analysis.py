@@ -41,6 +41,262 @@ PLOTLY_DOWNLOAD_OPTIONS = {
     "scale": 2,
 }
 
+FINANCIAL_SERIES_STATE_KEY = "financial_timeseries"
+FINANCIAL_SERIES_COLUMNS = [
+    "年度",
+    "区分",
+    "売上高",
+    "粗利益率",
+    "営業利益率",
+    "固定費",
+    "変動費",
+    "設備投資額",
+    "借入残高",
+    "減価償却費",
+    "総資産",
+]
+
+
+def _safe_decimal(value: object) -> Decimal:
+    if value in (None, "", "NaN", "nan"):
+        return Decimal("0")
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal("0")
+
+
+def _ratio_from_input(value: object) -> Decimal:
+    ratio = _safe_decimal(value)
+    if ratio.is_nan() or ratio.is_infinite():
+        return Decimal("0")
+    if ratio > Decimal("1") or ratio < Decimal("-1"):
+        ratio = ratio / Decimal("100")
+    return ratio
+
+
+def _financial_series_from_state(fiscal_year: int) -> pd.DataFrame:
+    state = st.session_state.get(FINANCIAL_SERIES_STATE_KEY, {})
+    records = state.get("records") if isinstance(state, dict) else None
+    if not isinstance(records, list) or not records:
+        return pd.DataFrame(columns=FINANCIAL_SERIES_COLUMNS)
+
+    df = pd.DataFrame(records).copy()
+    if "年度" not in df.columns:
+        return pd.DataFrame(columns=FINANCIAL_SERIES_COLUMNS)
+    df["年度"] = pd.to_numeric(df["年度"], errors="coerce").fillna(fiscal_year).astype(int)
+    if "区分" not in df.columns:
+        df["区分"] = ["実績" if year <= fiscal_year - 1 else "計画" for year in df["年度"]]
+    else:
+        df["区分"] = [
+            str(label).strip() if str(label).strip() else ("実績" if year <= fiscal_year - 1 else "計画")
+            for label, year in zip(df["区分"], df["年度"])
+        ]
+
+    for column in FINANCIAL_SERIES_COLUMNS:
+        if column not in df.columns:
+            df[column] = 0.0 if column != "区分" else "実績"
+
+    numeric_columns = [col for col in FINANCIAL_SERIES_COLUMNS if col not in ("年度", "区分")]
+    for column in numeric_columns:
+        df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+
+    df["_category_order"] = df["区分"].apply(lambda x: 0 if str(x).strip() == "実績" else 1)
+    df = (
+        df[FINANCIAL_SERIES_COLUMNS + ["_category_order"]]
+        .sort_values(["年度", "_category_order"])
+        .drop(columns="_category_order")
+        .reset_index(drop=True)
+    )
+    return df
+
+
+def _is_finite_decimal(value: Decimal) -> bool:
+    return isinstance(value, Decimal) and value.is_finite()
+
+
+def _compute_financial_metrics_table(
+    df: pd.DataFrame, tax_policy: TaxPolicy, fiscal_year: int
+) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+
+    rows: List[Dict[str, object]] = []
+    tax_rate = (
+        (tax_policy.corporate_tax_rate or Decimal("0"))
+        + (tax_policy.business_tax_rate or Decimal("0"))
+    )
+    tax_rate = max(Decimal("0"), tax_rate)
+
+    for _, record in df.iterrows():
+        year = int(record.get("年度", fiscal_year))
+        category_raw = str(record.get("区分", "")).strip()
+        category = category_raw if category_raw else ("実績" if year <= fiscal_year - 1 else "計画")
+
+        sales = _safe_decimal(record.get("売上高", 0))
+        gross_margin = _ratio_from_input(record.get("粗利益率", 0))
+        op_margin = _ratio_from_input(record.get("営業利益率", 0))
+        fixed_cost = _safe_decimal(record.get("固定費", 0))
+        variable_cost = _safe_decimal(record.get("変動費", 0))
+        capex = _safe_decimal(record.get("設備投資額", 0))
+        loan_balance = _safe_decimal(record.get("借入残高", 0))
+        depreciation = _safe_decimal(record.get("減価償却費", 0))
+        total_assets = _safe_decimal(record.get("総資産", 0))
+
+        gross_profit = sales * gross_margin
+        operating_profit = sales * op_margin
+
+        if (fixed_cost <= 0) and _is_finite_decimal(gross_profit) and _is_finite_decimal(operating_profit):
+            fixed_cost = max(Decimal("0"), gross_profit - operating_profit)
+
+        if variable_cost <= 0 and sales > 0:
+            variable_cost = max(Decimal("0"), sales - gross_profit)
+
+        contribution_ratio = gross_margin if gross_margin > 0 else Decimal("0")
+        if contribution_ratio <= 0 and sales > 0:
+            contribution_ratio = Decimal("1") - (variable_cost / sales)
+
+        if contribution_ratio > 0:
+            breakeven_sales = fixed_cost / contribution_ratio
+        else:
+            breakeven_sales = Decimal("NaN")
+
+        taxes = operating_profit * tax_rate if operating_profit > 0 else Decimal("0")
+        ebitda = operating_profit + depreciation
+        fcf = operating_profit - taxes + depreciation - capex
+        roa = operating_profit / total_assets if total_assets > 0 else Decimal("NaN")
+        variable_ratio = variable_cost / sales if sales > 0 else Decimal("NaN")
+
+        rows.append(
+            {
+                "年度": year,
+                "区分": category,
+                "売上高": sales,
+                "粗利益率": gross_margin,
+                "営業利益率": op_margin,
+                "固定費": fixed_cost,
+                "変動費": variable_cost,
+                "設備投資額": capex,
+                "借入残高": loan_balance,
+                "減価償却費": depreciation,
+                "総資産": total_assets,
+                "粗利益": gross_profit,
+                "営業利益": operating_profit,
+                "損益分岐点売上高": breakeven_sales,
+                "変動費率": variable_ratio,
+                "EBITDA": ebitda,
+                "FCF": fcf,
+                "ROA": roa,
+                "税金": taxes,
+            }
+        )
+
+    metrics_df = pd.DataFrame(rows)
+    metrics_df = metrics_df.sort_values(["年度", "区分"]).reset_index(drop=True)
+    return metrics_df
+
+
+def _monthly_financial_timeseries(metrics_df: pd.DataFrame) -> pd.DataFrame:
+    if metrics_df.empty:
+        return pd.DataFrame()
+
+    monthly_rows: List[Dict[str, object]] = []
+    for _, row in metrics_df.iterrows():
+        year = int(row.get("年度", 0))
+        sales = row.get("売上高", Decimal("0"))
+        breakeven = row.get("損益分岐点売上高", Decimal("NaN"))
+        ebitda = row.get("EBITDA", Decimal("0"))
+        fcf = row.get("FCF", Decimal("0"))
+        loan_balance = row.get("借入残高", Decimal("0"))
+
+        for month in range(1, 13):
+            monthly_rows.append(
+                {
+                    "年度": year,
+                    "月": month,
+                    "年月": f"FY{year} M{month:02d}",
+                    "売上高": sales / Decimal("12") if _is_finite_decimal(sales) else Decimal("NaN"),
+                    "損益分岐点売上高": breakeven / Decimal("12") if _is_finite_decimal(breakeven) else Decimal("NaN"),
+                    "EBITDA": ebitda / Decimal("12") if _is_finite_decimal(ebitda) else Decimal("NaN"),
+                    "FCF": fcf / Decimal("12") if _is_finite_decimal(fcf) else Decimal("NaN"),
+                    "借入残高": loan_balance if _is_finite_decimal(loan_balance) else Decimal("NaN"),
+                }
+            )
+
+    return pd.DataFrame(monthly_rows)
+
+
+def _decimal_to_float(value: object, divisor: Decimal) -> float | None:
+    try:
+        decimal_value = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    if not isinstance(decimal_value, Decimal) or not decimal_value.is_finite():
+        return None
+    divisor = divisor if divisor else Decimal("1")
+    return float(decimal_value / divisor)
+
+
+def _compute_trend_summary(metrics_df: pd.DataFrame) -> Dict[str, float]:
+    if metrics_df.empty or len(metrics_df) < 2:
+        return {}
+
+    sorted_df = metrics_df.sort_values("年度")
+    years = sorted_df["年度"].astype(float).to_numpy()
+
+    def _valid_series(series: pd.Series, transform=None) -> Tuple[np.ndarray, np.ndarray]:
+        values = []
+        x_values = []
+        for year, value in zip(years, series):
+            if isinstance(value, Decimal) and value.is_finite():
+                numeric_value = float(transform(value) if transform else value)
+                values.append(numeric_value)
+                x_values.append(year)
+        return np.array(x_values, dtype=float), np.array(values, dtype=float)
+
+    summary: Dict[str, float] = {}
+
+    x_sales, sales_values = _valid_series(sorted_df["売上高"])
+    if len(x_sales) >= 2:
+        slope, _ = np.polyfit(x_sales, sales_values, 1)
+        mean_sales = sales_values.mean()
+        summary["sales_slope"] = slope
+        if mean_sales != 0:
+            summary["sales_trend_pct"] = slope / mean_sales
+        first = sales_values[0]
+        last = sales_values[-1]
+        year_span = x_sales[-1] - x_sales[0]
+        if first > 0 and year_span > 0:
+            summary["sales_cagr"] = (last / first) ** (1 / year_span) - 1
+
+    x_margin, margin_values = _valid_series(
+        sorted_df["営業利益率"], transform=lambda v: v * Decimal("100")
+    )
+    if len(x_margin) >= 2:
+        slope_margin, _ = np.polyfit(x_margin, margin_values, 1)
+        summary["op_margin_slope"] = slope_margin
+
+    x_roa, roa_values = _valid_series(sorted_df["ROA"], transform=lambda v: v * Decimal("100"))
+    if len(x_roa) >= 2:
+        slope_roa, _ = np.polyfit(x_roa, roa_values, 1)
+        summary["roa_slope"] = slope_roa
+
+    return summary
+
+
+def _series_total(series: pd.Series) -> float:
+    total = 0.0
+    for value in series:
+        if isinstance(value, Decimal):
+            if value.is_finite():
+                total += float(value)
+        else:
+            try:
+                total += float(value)
+            except (TypeError, ValueError):
+                continue
+    return total
+
 def _accessible_palette() -> List[str]:
     palette_source = COLOR_BLIND_COLORS if st.session_state.get("ui_color_blind", False) else THEME_COLORS
     return [
@@ -548,7 +804,9 @@ monthly_bs_df = pd.DataFrame(monthly_bs_rows)
 st.title("📈 KPI・損益分析")
 st.caption(f"FY{fiscal_year} / 表示単位: {unit} / FTE: {fte}")
 
-kpi_tab, be_tab, cash_tab = st.tabs(["KPIダッシュボード", "損益分岐点", "資金繰り"])
+kpi_tab, be_tab, cash_tab, trend_tab = st.tabs(
+    ["KPIダッシュボード", "損益分岐点", "資金繰り", "財務トレンド分析"]
+)
 
 with kpi_tab:
     st.subheader("主要KPI")
@@ -1501,3 +1759,282 @@ with cash_tab:
         st.info('借入データが未登録のため、DSCRを算出できません。')
 
     st.caption("営業CFには減価償却費を足し戻し、税引後利益を反映しています。投資CFはCapex、財務CFは利息支払を表します。")
+
+with trend_tab:
+    st.subheader("財務トレンド分析")
+    fiscal_year_int = fiscal_year  # fiscal_year is derived from settings_state earlier
+    financial_series_df = _financial_series_from_state(fiscal_year_int)
+    if financial_series_df.empty:
+        st.info("Inputsページの『税制・保存』ステップで財務指標を入力すると、ここに多年度の分析が表示されます。")
+    else:
+        metrics_timeseries = _compute_financial_metrics_table(
+            financial_series_df, tax_policy, fiscal_year_int
+        )
+        activity_total = 0.0
+        for column in ["売上高", "固定費", "変動費", "設備投資額", "借入残高"]:
+            if column in metrics_timeseries.columns:
+                activity_total += _series_total(metrics_timeseries[column])
+        if metrics_timeseries.empty or activity_total == 0.0:
+            st.info("財務指標が未入力のため、分析を表示できません。税制・保存ステップで数値を追加してください。")
+        else:
+            sorted_metrics = metrics_timeseries.sort_values("年度").reset_index(drop=True)
+            latest_row = sorted_metrics.iloc[-1]
+            summary_cols = st.columns(4)
+            summary_cols[0].metric(
+                "最新年度 売上高", format_amount_with_unit(latest_row["売上高"], unit)
+            )
+            summary_cols[1].metric(
+                "最新年度 EBITDA", format_amount_with_unit(latest_row["EBITDA"], unit)
+            )
+            summary_cols[2].metric(
+                "最新年度 FCF", format_amount_with_unit(latest_row["FCF"], unit)
+            )
+            summary_cols[3].metric(
+                "最新年度 ROA", format_ratio(latest_row["ROA"])
+            )
+            st.caption("EBITDAは営業利益に減価償却費を加算した値、FCFは税引後営業CFからCAPEXを控除した値です。")
+
+            annual_display_rows: List[Dict[str, object]] = []
+            for _, row in sorted_metrics.iterrows():
+                annual_display_rows.append(
+                    {
+                        "年度": f"FY{int(row['年度'])}",
+                        "区分": row["区分"],
+                        "売上高": format_amount_with_unit(row["売上高"], unit),
+                        "営業利益": format_amount_with_unit(row["営業利益"], unit),
+                        "EBITDA": format_amount_with_unit(row["EBITDA"], unit),
+                        "FCF": format_amount_with_unit(row["FCF"], unit),
+                        "粗利益率": format_ratio(row["粗利益率"]),
+                        "営業利益率": format_ratio(row["営業利益率"]),
+                        "ROA": format_ratio(row["ROA"]),
+                        "損益分岐点売上高": format_amount_with_unit(
+                            row["損益分岐点売上高"], unit
+                        ),
+                    }
+                )
+            annual_display_df = pd.DataFrame(annual_display_rows)
+            st.dataframe(
+                annual_display_df,
+                hide_index=True,
+                **use_container_width_kwargs(st.dataframe),
+            )
+
+            monthly_timeseries_df = _monthly_financial_timeseries(sorted_metrics)
+            if not monthly_timeseries_df.empty:
+                monthly_plot_df = monthly_timeseries_df.copy()
+                monthly_plot_df["売上高"] = monthly_plot_df["売上高"].apply(
+                    lambda v: _decimal_to_float(v, unit_factor)
+                )
+                monthly_plot_df["損益分岐点売上高"] = monthly_plot_df["損益分岐点売上高"].apply(
+                    lambda v: _decimal_to_float(v, unit_factor)
+                )
+                monthly_plot_df["EBITDA"] = monthly_plot_df["EBITDA"].apply(
+                    lambda v: _decimal_to_float(v, unit_factor)
+                )
+                monthly_plot_df["FCF"] = monthly_plot_df["FCF"].apply(
+                    lambda v: _decimal_to_float(v, unit_factor)
+                )
+                monthly_plot_df["借入残高"] = monthly_plot_df["借入残高"].apply(
+                    lambda v: _decimal_to_float(v, unit_factor)
+                )
+
+                monthly_sales_fig = make_subplots(specs=[[{"secondary_y": True}]])
+                monthly_sales_fig.add_trace(
+                    go.Scatter(
+                        x=monthly_plot_df["年月"],
+                        y=monthly_plot_df["売上高"],
+                        name=f"売上高（月次換算, {unit})",
+                        mode="lines",
+                        line=dict(color=palette[0], width=3),
+                        hovertemplate="%{x}<br>売上高=%{y:,.2f} {unit}<extra></extra>",
+                    ),
+                    secondary_y=False,
+                )
+                monthly_sales_fig.add_trace(
+                    go.Scatter(
+                        x=monthly_plot_df["年月"],
+                        y=monthly_plot_df["損益分岐点売上高"],
+                        name=f"損益分岐点（月次換算, {unit})",
+                        mode="lines",
+                        line=dict(color=palette[1], dash="dash"),
+                        hovertemplate="%{x}<br>損益分岐点=%{y:,.2f} {unit}<extra></extra>",
+                    ),
+                    secondary_y=False,
+                )
+                monthly_sales_fig.add_trace(
+                    go.Scatter(
+                        x=monthly_plot_df["年月"],
+                        y=monthly_plot_df["借入残高"],
+                        name=f"借入残高 ({unit})",
+                        mode="lines",
+                        line=dict(color=palette[2]),
+                        hovertemplate="%{x}<br>借入残高=%{y:,.2f} {unit}<extra></extra>",
+                    ),
+                    secondary_y=True,
+                )
+                monthly_sales_fig.update_layout(
+                    hovermode="x unified",
+                    xaxis=dict(tickangle=-45),
+                    yaxis_title=f"金額 ({unit})",
+                    yaxis2=dict(title=f"借入残高 ({unit})", overlaying="y", side="right"),
+                    legend=dict(title=""),
+                )
+                st.plotly_chart(
+                    monthly_sales_fig,
+                    use_container_width=True,
+                    config=plotly_download_config("financial_monthly_sales"),
+                )
+
+                monthly_cash_fig = go.Figure()
+                monthly_cash_fig.add_trace(
+                    go.Bar(
+                        x=monthly_plot_df["年月"],
+                        y=monthly_plot_df["EBITDA"],
+                        name=f"EBITDA ({unit})",
+                        marker_color=palette[3],
+                        hovertemplate="%{x}<br>EBITDA=%{y:,.2f} {unit}<extra></extra>",
+                    )
+                )
+                monthly_cash_fig.add_trace(
+                    go.Bar(
+                        x=monthly_plot_df["年月"],
+                        y=monthly_plot_df["FCF"],
+                        name=f"フリーCF ({unit})",
+                        marker_color=palette[4],
+                        hovertemplate="%{x}<br>フリーCF=%{y:,.2f} {unit}<extra></extra>",
+                    )
+                )
+                monthly_cash_fig.update_layout(
+                    barmode="group",
+                    xaxis=dict(tickangle=-45),
+                    yaxis_title=f"金額 ({unit})",
+                    legend=dict(title=""),
+                )
+                st.plotly_chart(
+                    monthly_cash_fig,
+                    use_container_width=True,
+                    config=plotly_download_config("financial_monthly_cash"),
+                )
+            else:
+                st.info("売上高などの値がゼロのため月次換算グラフを描画できません。数値を入力すると推移が表示されます。")
+
+            ratio_fig = go.Figure()
+            gross_ratio_series = [
+                float(value * Decimal("100"))
+                if isinstance(value, Decimal) and value.is_finite()
+                else None
+                for value in sorted_metrics["粗利益率"]
+            ]
+            op_ratio_series = [
+                float(value * Decimal("100"))
+                if isinstance(value, Decimal) and value.is_finite()
+                else None
+                for value in sorted_metrics["営業利益率"]
+            ]
+            roa_ratio_series = [
+                float(value * Decimal("100"))
+                if isinstance(value, Decimal) and value.is_finite()
+                else None
+                for value in sorted_metrics["ROA"]
+            ]
+
+            ratio_fig.add_trace(
+                go.Scatter(
+                    x=sorted_metrics["年度"],
+                    y=gross_ratio_series,
+                    name="粗利益率",
+                    mode="lines+markers",
+                    line=dict(color=palette[0]),
+                    hovertemplate="FY%{x}<br>粗利益率=%{y:.1f}%<extra></extra>",
+                )
+            )
+            ratio_fig.add_trace(
+                go.Scatter(
+                    x=sorted_metrics["年度"],
+                    y=op_ratio_series,
+                    name="営業利益率",
+                    mode="lines+markers",
+                    line=dict(color=palette[1]),
+                    hovertemplate="FY%{x}<br>営業利益率=%{y:.1f}%<extra></extra>",
+                )
+            )
+            if any(value is not None for value in roa_ratio_series):
+                ratio_fig.add_trace(
+                    go.Scatter(
+                        x=sorted_metrics["年度"],
+                        y=roa_ratio_series,
+                        name="ROA",
+                        mode="lines+markers",
+                        line=dict(color=palette[2]),
+                        hovertemplate="FY%{x}<br>ROA=%{y:.1f}%<extra></extra>",
+                    )
+                )
+            ratio_fig.update_layout(
+                yaxis_title="割合 (%)",
+                hovermode="x unified",
+                legend=dict(title=""),
+            )
+            st.plotly_chart(
+                ratio_fig,
+                use_container_width=True,
+                config=plotly_download_config("financial_ratio_trend"),
+            )
+            st.caption("粗利率・営業利益率・ROAの年次推移。改善傾向を確認できます。")
+
+            trend_summary = _compute_trend_summary(sorted_metrics)
+            if trend_summary:
+                st.markdown("#### トレンド指標")
+                trend_entries: List[Tuple[str, str, str | None]] = []
+                if "sales_trend_pct" in trend_summary and "sales_slope" in trend_summary:
+                    slope_amount = Decimal(str(trend_summary["sales_slope"]))
+                    trend_entries.append(
+                        (
+                            "売上回帰トレンド",
+                            f"{trend_summary['sales_trend_pct'] * 100:.2f}%/年",
+                            f"{format_amount_with_unit(slope_amount, unit)}/年",
+                        )
+                    )
+                if "sales_cagr" in trend_summary:
+                    trend_entries.append(
+                        (
+                            "売上CAGR",
+                            f"{trend_summary['sales_cagr'] * 100:.2f}%",
+                            None,
+                        )
+                    )
+                if "op_margin_slope" in trend_summary:
+                    latest_margin = sorted_metrics["営業利益率"].iloc[-1]
+                    if isinstance(latest_margin, Decimal) and latest_margin.is_finite():
+                        margin_value = f"{float(latest_margin * Decimal('100')):.1f}%"
+                    else:
+                        margin_value = "—"
+                    trend_entries.append(
+                        (
+                            "営業利益率トレンド",
+                            margin_value,
+                            f"{trend_summary['op_margin_slope']:.2f} pt/年",
+                        )
+                    )
+                if "roa_slope" in trend_summary:
+                    latest_roa = sorted_metrics["ROA"].iloc[-1]
+                    if isinstance(latest_roa, Decimal) and latest_roa.is_finite():
+                        roa_value = f"{float(latest_roa * Decimal('100')):.1f}%"
+                    else:
+                        roa_value = "—"
+                    trend_entries.append(
+                        (
+                            "ROAトレンド",
+                            roa_value,
+                            f"{trend_summary['roa_slope']:.2f} pt/年",
+                        )
+                    )
+
+                if trend_entries:
+                    trend_cols = st.columns(len(trend_entries))
+                    for idx, (label, value, delta) in enumerate(trend_entries):
+                        if delta is not None:
+                            trend_cols[idx].metric(label, value, delta=delta)
+                        else:
+                            trend_cols[idx].metric(label, value)
+            else:
+                st.caption("回帰分析は2期間以上のデータが必要です。")

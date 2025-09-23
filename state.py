@@ -93,6 +93,11 @@ STATE_SPECS: Dict[str, StateSpec] = {
         dict,
         "Fermi推定の学習履歴",
     ),
+    "financial_timeseries": StateSpec(
+        lambda: {"records": [], "base_year": None},
+        dict,
+        "多年度の財務指標データ",
+    ),
     "tutorial_mode": StateSpec(lambda: True, bool, "チュートリアルモードの有効/無効"),
     "tutorial_shown_steps": StateSpec(lambda: set(), set, "チュートリアル表示済みステップ"),
     "cost_range_profiles": StateSpec(dict, dict, "コスト推定レンジの保存領域"),
