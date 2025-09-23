@@ -23,6 +23,7 @@ from models import (
     EstimateRange,
     CapexPlan,
     LoanSchedule,
+    TaxPolicy,
 )
 from calc import compute, generate_cash_flow, plan_from_models
 from pydantic import ValidationError
@@ -2713,8 +2714,9 @@ elif current_step == "tax":
             Decimal(str(preview_amounts.get(code, Decimal("0"))))
             for code in CONSUMPTION_TAX_DEDUCTIBLE_CODES
         )
-        income_breakdown = preview_bundle.tax.income_tax_components(ordinary_income)
-        consumption_breakdown = preview_bundle.tax.consumption_tax_balance(
+        tax_policy = TaxPolicy.model_validate(preview_bundle.tax)
+        income_breakdown = tax_policy.income_tax_components(ordinary_income)
+        consumption_breakdown = tax_policy.consumption_tax_balance(
             sales_total_decimal,
             taxable_expense_total,
         )
@@ -2725,19 +2727,19 @@ elif current_step == "tax":
                 {
                     "税目": "所得税・法人税",
                     "課税ベース": format_amount_with_unit(ordinary_income, unit),
-                    "税率": format_ratio(preview_bundle.tax.corporate_tax_rate),
+                    "税率": format_ratio(tax_policy.corporate_tax_rate),
                     "想定納税額": format_amount_with_unit(income_breakdown["corporate"], unit),
                 },
                 {
                     "税目": "事業税",
                     "課税ベース": format_amount_with_unit(ordinary_income, unit),
-                    "税率": format_ratio(preview_bundle.tax.business_tax_rate),
+                    "税率": format_ratio(tax_policy.business_tax_rate),
                     "想定納税額": format_amount_with_unit(income_breakdown["business"], unit),
                 },
                 {
                     "税目": "消費税 (純額)",
                     "課税ベース": format_amount_with_unit(consumption_base, unit),
-                    "税率": format_ratio(preview_bundle.tax.consumption_tax_rate),
+                    "税率": format_ratio(tax_policy.consumption_tax_rate),
                     "想定納税額": format_amount_with_unit(consumption_breakdown["net"], unit),
                 },
                 {
