@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Mapping
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
+from pydantic import BaseModel, ValidationError
 
 from calc import (
     ITEMS,
@@ -144,17 +145,55 @@ def build_cost_composition(amounts_data: Dict[str, str]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _monthly_capex_schedule(capex: CapexPlan) -> Dict[int, Decimal]:
+def _coerce_capex_plan(value: object) -> CapexPlan | None:
+    if isinstance(value, CapexPlan):
+        return value
+    if isinstance(value, BaseModel):
+        try:
+            return CapexPlan.model_validate(value)
+        except (ValidationError, TypeError, ValueError):
+            return None
+    if isinstance(value, Mapping):
+        try:
+            return CapexPlan.model_validate(dict(value))
+        except (ValidationError, TypeError, ValueError):
+            return None
+    return None
+
+
+def _coerce_loan_schedule(value: object) -> LoanSchedule | None:
+    if isinstance(value, LoanSchedule):
+        return value
+    if isinstance(value, BaseModel):
+        try:
+            return LoanSchedule.model_validate(value)
+        except (ValidationError, TypeError, ValueError):
+            return None
+    if isinstance(value, Mapping):
+        try:
+            return LoanSchedule.model_validate(dict(value))
+        except (ValidationError, TypeError, ValueError):
+            return None
+    return None
+
+
+def _monthly_capex_schedule(capex: object) -> Dict[int, Decimal]:
     schedule = {month: Decimal("0") for month in range(1, 13)}
-    for entry in capex.payment_schedule():
+    capex_plan = _coerce_capex_plan(capex)
+    if capex_plan is None:
+        return schedule
+    for entry in capex_plan.payment_schedule():
         if entry.absolute_month <= 12:
             schedule[entry.absolute_month] += entry.amount
     return schedule
 
 
-def _monthly_debt_schedule(loans: LoanSchedule) -> Dict[int, Dict[str, Decimal]]:
+def _monthly_debt_schedule(loans: object) -> Dict[int, Dict[str, Decimal]]:
     schedule: Dict[int, Dict[str, Decimal]] = {}
-    for entry in loans.amortization_schedule():
+    loan_schedule = _coerce_loan_schedule(loans)
+    if loan_schedule is None:
+        return schedule
+    for entry in loan_schedule.amortization_schedule():
         if entry.absolute_month > 12:
             continue
         month_entry = schedule.setdefault(
