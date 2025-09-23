@@ -56,6 +56,189 @@ FINANCIAL_SERIES_COLUMNS = [
     "総資産",
 ]
 
+STRATEGIC_ANALYSIS_KEY = "strategic_analysis"
+SWOT_CATEGORIES = ("強み", "弱み", "機会", "脅威")
+PEST_DIMENSIONS = ("政治", "経済", "社会", "技術")
+PEST_DIRECTIONS = ("機会", "脅威")
+SWOT_DISPLAY_COLUMNS = ["分類", "要因", "重要度", "確度", "スコア", "備考"]
+PEST_DISPLAY_COLUMNS = ["区分", "要因", "影響方向", "影響度", "確度", "スコア", "備考"]
+
+
+def _strategic_records_from_state(key: str) -> List[Dict[str, object]]:
+    state = st.session_state.get(STRATEGIC_ANALYSIS_KEY, {})
+    if isinstance(state, Mapping):
+        data = state.get(key)
+        if isinstance(data, list):
+            return [record for record in data if isinstance(record, dict)]
+    return []
+
+
+def _bounded_score(value: object, default: float = 3.0) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not np.isfinite(number):
+        return default
+    return float(min(5.0, max(1.0, number)))
+
+
+def _swot_dataframe(records: List[Dict[str, object]]) -> pd.DataFrame:
+    rows: List[Dict[str, object]] = []
+    for record in records:
+        category = str(record.get("category", ""))
+        if category not in SWOT_CATEGORIES:
+            continue
+        factor = str(record.get("factor", "")).strip()
+        if not factor:
+            continue
+        impact = _bounded_score(record.get("impact", 3.0))
+        probability = _bounded_score(record.get("probability", 3.0))
+        note = str(record.get("note", "")).strip()
+        score = impact * probability
+        rows.append(
+            {
+                "分類": category,
+                "要因": factor,
+                "重要度": impact,
+                "確度": probability,
+                "スコア": score,
+                "備考": note,
+            }
+        )
+    if not rows:
+        return pd.DataFrame(columns=SWOT_DISPLAY_COLUMNS)
+    df = pd.DataFrame(rows)
+    for column in SWOT_DISPLAY_COLUMNS:
+        if column not in df.columns:
+            df[column] = ""
+    return df[SWOT_DISPLAY_COLUMNS].copy()
+
+
+def _pest_dataframe(records: List[Dict[str, object]]) -> pd.DataFrame:
+    rows: List[Dict[str, object]] = []
+    for record in records:
+        dimension = str(record.get("dimension", ""))
+        if dimension not in PEST_DIMENSIONS:
+            continue
+        direction = str(record.get("direction", ""))
+        if direction not in PEST_DIRECTIONS:
+            continue
+        factor = str(record.get("factor", "")).strip()
+        if not factor:
+            continue
+        impact = _bounded_score(record.get("impact", 3.0))
+        probability = _bounded_score(record.get("probability", 3.0))
+        note = str(record.get("note", "")).strip()
+        score = impact * probability
+        rows.append(
+            {
+                "区分": dimension,
+                "要因": factor,
+                "影響方向": direction,
+                "影響度": impact,
+                "確度": probability,
+                "スコア": score,
+                "備考": note,
+            }
+        )
+    if not rows:
+        return pd.DataFrame(columns=PEST_DISPLAY_COLUMNS)
+    df = pd.DataFrame(rows)
+    for column in PEST_DISPLAY_COLUMNS:
+        if column not in df.columns:
+            df[column] = ""
+    return df[PEST_DISPLAY_COLUMNS].copy()
+
+
+def _swot_summary_table(swot_df: pd.DataFrame) -> pd.DataFrame:
+    if swot_df.empty:
+        return pd.DataFrame(columns=["分類", "件数", "平均重要度", "平均確度", "平均スコア", "合計スコア"])
+
+    summary_rows: List[Dict[str, object]] = []
+    for category in SWOT_CATEGORIES:
+        subset = swot_df[swot_df["分類"] == category]
+        if subset.empty:
+            continue
+        summary_rows.append(
+            {
+                "分類": category,
+                "件数": int(len(subset)),
+                "平均重要度": round(float(subset["重要度"].mean()), 2),
+                "平均確度": round(float(subset["確度"].mean()), 2),
+                "平均スコア": round(float(subset["スコア"].mean()), 2),
+                "合計スコア": round(float(subset["スコア"].sum()), 2),
+            }
+        )
+    return pd.DataFrame(summary_rows)
+
+
+def _pest_summary_table(pest_df: pd.DataFrame) -> pd.DataFrame:
+    if pest_df.empty:
+        return pd.DataFrame(columns=["区分", "影響方向", "件数", "平均影響度", "平均確度", "平均スコア", "合計スコア"])
+
+    grouped = (
+        pest_df.groupby(["区分", "影響方向"], dropna=False)
+        .agg(
+            件数=("要因", "count"),
+            平均影響度=("影響度", "mean"),
+            平均確度=("確度", "mean"),
+            平均スコア=("スコア", "mean"),
+            合計スコア=("スコア", "sum"),
+        )
+        .reset_index()
+    )
+    for column in ["平均影響度", "平均確度", "平均スコア", "合計スコア"]:
+        grouped[column] = grouped[column].astype(float).round(2)
+    return grouped
+
+
+def _swot_quadrant_markdown(swot_df: pd.DataFrame, category: str) -> str:
+    subset = swot_df[swot_df["分類"] == category].sort_values("スコア", ascending=False)
+    if subset.empty:
+        return "- (未入力)"
+    lines: List[str] = []
+    for _, row in subset.iterrows():
+        note = str(row.get("備考", "")).strip()
+        note_text = f" ｜ {note}" if note else ""
+        lines.append(
+            "- {factor}｜スコア {score:.1f}（重要度 {impact:.1f} × 確度 {prob:.1f}）{note}".format(
+                factor=str(row["要因"]),
+                score=float(row["スコア"]),
+                impact=float(row["重要度"]),
+                prob=float(row["確度"]),
+                note=note_text,
+            )
+        )
+    return "\n".join(lines)
+
+
+def _top_swot_item(swot_df: pd.DataFrame, category: str) -> Dict[str, object] | None:
+    subset = swot_df[swot_df["分類"] == category]
+    if subset.empty:
+        return None
+    best = subset.sort_values(["スコア", "重要度"], ascending=False).iloc[0]
+    return {
+        "factor": str(best["要因"]),
+        "score": float(best["スコア"]),
+        "impact": float(best["重要度"]),
+        "probability": float(best["確度"]),
+    }
+
+
+def _top_pest_item(pest_df: pd.DataFrame, direction: str) -> Dict[str, object] | None:
+    subset = pest_df[pest_df["影響方向"] == direction]
+    if subset.empty:
+        return None
+    best = subset.sort_values(["スコア", "影響度"], ascending=False).iloc[0]
+    return {
+        "factor": str(best["要因"]),
+        "dimension": str(best["区分"]),
+        "score": float(best["スコア"]),
+        "impact": float(best["影響度"]),
+        "probability": float(best["確度"]),
+    }
+
 
 def _safe_decimal(value: object) -> Decimal:
     if value in (None, "", "NaN", "nan"):
@@ -804,8 +987,8 @@ monthly_bs_df = pd.DataFrame(monthly_bs_rows)
 st.title("📈 KPI・損益分析")
 st.caption(f"FY{fiscal_year} / 表示単位: {unit} / FTE: {fte}")
 
-kpi_tab, be_tab, cash_tab, trend_tab = st.tabs(
-    ["KPIダッシュボード", "損益分岐点", "資金繰り", "財務トレンド分析"]
+kpi_tab, be_tab, cash_tab, trend_tab, strategy_tab = st.tabs(
+    ["KPIダッシュボード", "損益分岐点", "資金繰り", "財務トレンド分析", "SWOT・PEST分析"]
 )
 
 with kpi_tab:
@@ -2038,3 +2221,153 @@ with trend_tab:
                             trend_cols[idx].metric(label, value)
             else:
                 st.caption("回帰分析は2期間以上のデータが必要です。")
+
+
+with strategy_tab:
+    st.subheader("SWOT・PEST分析")
+    swot_records = _strategic_records_from_state("swot")
+    pest_records = _strategic_records_from_state("pest")
+    swot_df = _swot_dataframe(swot_records)
+    pest_df = _pest_dataframe(pest_records)
+
+    if swot_df.empty and pest_df.empty:
+        st.info("Inputsページ『ビジネスモデル整理』ステップでSWOT/PESTを入力すると、ここに分析結果が表示されます。")
+    else:
+        if not swot_df.empty:
+            st.markdown("#### SWOTマトリクス")
+            top_row = st.columns(2)
+            with top_row[0]:
+                st.markdown("**強み (Strengths)**")
+                st.markdown(_swot_quadrant_markdown(swot_df, "強み"))
+            with top_row[1]:
+                st.markdown("**弱み (Weaknesses)**")
+                st.markdown(_swot_quadrant_markdown(swot_df, "弱み"))
+            bottom_row = st.columns(2)
+            with bottom_row[0]:
+                st.markdown("**機会 (Opportunities)**")
+                st.markdown(_swot_quadrant_markdown(swot_df, "機会"))
+            with bottom_row[1]:
+                st.markdown("**脅威 (Threats)**")
+                st.markdown(_swot_quadrant_markdown(swot_df, "脅威"))
+            st.caption("スコア = 重要度 × 確度。値が大きいほど優先的に検討すべき要因です。")
+
+            swot_summary = _swot_summary_table(swot_df)
+            if not swot_summary.empty:
+                st.dataframe(
+                    swot_summary,
+                    hide_index=True,
+                    **use_container_width_kwargs(st.dataframe),
+                )
+        else:
+            st.info("SWOTの入力が未登録のため、マトリクスを表示できません。Inputsページで要因を整理してください。")
+
+        if not pest_df.empty:
+            st.markdown("#### PEST分析サマリー")
+            pest_summary = _pest_summary_table(pest_df)
+            if not pest_summary.empty:
+                st.dataframe(
+                    pest_summary,
+                    hide_index=True,
+                    **use_container_width_kwargs(st.dataframe),
+                )
+            with st.expander("PEST要因の詳細", expanded=False):
+                detailed = pest_df.sort_values("スコア", ascending=False).copy()
+                for column in ["影響度", "確度", "スコア"]:
+                    detailed[column] = detailed[column].astype(float).round(2)
+                st.dataframe(
+                    detailed,
+                    hide_index=True,
+                    **use_container_width_kwargs(st.dataframe),
+                )
+        else:
+            st.info("PESTの入力が未登録のため、外部環境サマリーを表示できません。政治・経済などの要因を追記しましょう。")
+
+        st.markdown("#### 戦略インサイト")
+        comments: List[str] = []
+
+        strength_subset = swot_df[swot_df["分類"] == "強み"]
+        weakness_subset = swot_df[swot_df["分類"] == "弱み"]
+        opportunity_subset_swot = swot_df[swot_df["分類"] == "機会"]
+        threat_subset_swot = swot_df[swot_df["分類"] == "脅威"]
+        opportunity_subset_pest = pest_df[pest_df["影響方向"] == "機会"]
+        threat_subset_pest = pest_df[pest_df["影響方向"] == "脅威"]
+
+        strength_count = int(len(strength_subset))
+        weakness_count = int(len(weakness_subset))
+        opportunity_count = int(len(opportunity_subset_swot) + len(opportunity_subset_pest))
+        threat_count = int(len(threat_subset_swot) + len(threat_subset_pest))
+
+        strength_total = float(strength_subset["スコア"].sum())
+        weakness_total = float(weakness_subset["スコア"].sum())
+        opportunity_total = float(opportunity_subset_swot["スコア"].sum()) + float(
+            opportunity_subset_pest["スコア"].sum()
+        )
+        threat_total = float(threat_subset_swot["スコア"].sum()) + float(threat_subset_pest["スコア"].sum())
+
+        strength_avg = strength_total / strength_count if strength_count else 0.0
+        weakness_avg = weakness_total / weakness_count if weakness_count else 0.0
+        opportunity_avg = opportunity_total / opportunity_count if opportunity_count else 0.0
+        threat_avg = threat_total / threat_count if threat_count else 0.0
+
+        if strength_count and opportunity_count:
+            synergy_index = strength_avg * opportunity_avg
+            top_strength = _top_swot_item(swot_df, "強み")
+            top_opportunity = _top_swot_item(swot_df, "機会")
+            opportunity_source = "SWOT"
+            if top_opportunity is None:
+                top_opportunity = _top_pest_item(pest_df, "機会")
+                opportunity_source = "PEST"
+            detail_text = ""
+            if top_strength and top_opportunity:
+                opportunity_label = top_opportunity["factor"]
+                if opportunity_source == "PEST" and top_opportunity.get("dimension"):
+                    opportunity_label = f"{opportunity_label}（{top_opportunity['dimension']}）"
+                detail_text = (
+                    f"重点：『{top_strength['factor']}』（スコア{top_strength['score']:.1f}）×『{opportunity_label}』"
+                    f"（スコア{top_opportunity['score']:.1f}）"
+                )
+            comments.append(
+                "強み×機会の活用余地指数: {index:.1f}（強み平均スコア {s_avg:.1f} / {s_count}件, "
+                "機会平均スコア {o_avg:.1f} / {o_count}件）{detail}".format(
+                    index=synergy_index,
+                    s_avg=strength_avg,
+                    s_count=strength_count,
+                    o_avg=opportunity_avg,
+                    o_count=opportunity_count,
+                    detail=f" — {detail_text}" if detail_text else "",
+                )
+            )
+
+        if weakness_count and threat_count:
+            risk_index = weakness_avg * threat_avg
+            top_weakness = _top_swot_item(swot_df, "弱み")
+            top_threat = _top_swot_item(swot_df, "脅威")
+            threat_source = "SWOT"
+            if top_threat is None:
+                top_threat = _top_pest_item(pest_df, "脅威")
+                threat_source = "PEST"
+            detail_text = ""
+            if top_weakness and top_threat:
+                threat_label = top_threat["factor"]
+                if threat_source == "PEST" and top_threat.get("dimension"):
+                    threat_label = f"{threat_label}（{top_threat['dimension']}）"
+                detail_text = (
+                    f"重点対策：『{top_weakness['factor']}』（スコア{top_weakness['score']:.1f}）×『{threat_label}』"
+                    f"（スコア{top_threat['score']:.1f}）"
+                )
+            comments.append(
+                "弱み×脅威の回避優先度指数: {index:.1f}（弱み平均スコア {w_avg:.1f} / {w_count}件, "
+                "脅威平均スコア {t_avg:.1f} / {t_count}件）{detail}".format(
+                    index=risk_index,
+                    w_avg=weakness_avg,
+                    w_count=weakness_count,
+                    t_avg=threat_avg,
+                    t_count=threat_count,
+                    detail=f" — {detail_text}" if detail_text else "",
+                )
+            )
+
+        if comments:
+            st.markdown("\n".join(f"- {comment}" for comment in comments))
+        else:
+            st.caption("強み・弱み・機会・脅威の入力が不足しているため、定量コメントを生成できませんでした。")

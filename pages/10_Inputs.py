@@ -140,7 +140,7 @@ WIZARD_STEPS = [
     {
         "id": "context",
         "title": "ビジネスモデル整理",
-        "description": "3C分析とビジネスモデルキャンバスの主要項目を言語化します。",
+        "description": "3C分析・ビジネスモデルキャンバス・SWOT/PESTで事業環境を整理します。",
     },
     {
         "id": "sales",
@@ -183,6 +183,32 @@ BUSINESS_CONTEXT_PLACEHOLDER = {
     "bmc_channels": "顧客に価値を届けるチャネル (例：ECサイト、代理店、直販営業)",
     "qualitative_memo": "事業計画書に記載したい補足・KGI/KPIの背景",
 }
+
+STRATEGIC_ANALYSIS_KEY = "strategic_analysis"
+SWOT_CATEGORY_OPTIONS = ("強み", "弱み", "機会", "脅威")
+PEST_DIMENSION_OPTIONS = ("政治", "経済", "社会", "技術")
+PEST_DIRECTION_OPTIONS = ("機会", "脅威")
+SWOT_EDITOR_COLUMNS = ("分類", "要因", "重要度(1-5)", "確度(1-5)", "備考")
+PEST_EDITOR_COLUMNS = (
+    "区分",
+    "要因",
+    "影響方向",
+    "影響度(1-5)",
+    "確度(1-5)",
+    "備考",
+)
+DEFAULT_SWOT_EDITOR_ROWS = [
+    {"分類": "強み", "要因": "", "重要度(1-5)": 3.0, "確度(1-5)": 3.0, "備考": ""},
+    {"分類": "弱み", "要因": "", "重要度(1-5)": 3.0, "確度(1-5)": 3.0, "備考": ""},
+    {"分類": "機会", "要因": "", "重要度(1-5)": 3.0, "確度(1-5)": 3.0, "備考": ""},
+    {"分類": "脅威", "要因": "", "重要度(1-5)": 3.0, "確度(1-5)": 3.0, "備考": ""},
+]
+DEFAULT_PEST_EDITOR_ROWS = [
+    {"区分": "政治", "要因": "", "影響方向": "機会", "影響度(1-5)": 3.0, "確度(1-5)": 3.0, "備考": ""},
+    {"区分": "経済", "要因": "", "影響方向": "機会", "影響度(1-5)": 3.0, "確度(1-5)": 3.0, "備考": ""},
+    {"区分": "社会", "要因": "", "影響方向": "機会", "影響度(1-5)": 3.0, "確度(1-5)": 3.0, "備考": ""},
+    {"区分": "技術", "要因": "", "影響方向": "機会", "影響度(1-5)": 3.0, "確度(1-5)": 3.0, "備考": ""},
+]
 
 CUSTOMER_EXAMPLE_TEXT = (
     "例：主要顧客やターゲット市場の概要｜年商5〜10億円規模の製造業の経営企画部門。"
@@ -296,6 +322,179 @@ def _persist_financial_timeseries(df: pd.DataFrame, fiscal_year: int) -> None:
     }
 
 
+def _swot_editor_dataframe_from_state(records: List[Dict[str, object]] | None) -> pd.DataFrame:
+    if not records:
+        return pd.DataFrame(DEFAULT_SWOT_EDITOR_ROWS, columns=SWOT_EDITOR_COLUMNS)
+
+    rows: List[Dict[str, object]] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        category = str(record.get("category", "")) or SWOT_CATEGORY_OPTIONS[0]
+        if category not in SWOT_CATEGORY_OPTIONS:
+            category = SWOT_CATEGORY_OPTIONS[0]
+        try:
+            impact = float(record.get("impact", 3.0))
+        except (TypeError, ValueError):
+            impact = 3.0
+        try:
+            probability = float(record.get("probability", 3.0))
+        except (TypeError, ValueError):
+            probability = 3.0
+        rows.append(
+            {
+                "分類": category,
+                "要因": str(record.get("factor", "")),
+                "重要度(1-5)": impact,
+                "確度(1-5)": probability,
+                "備考": str(record.get("note", "")),
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame(DEFAULT_SWOT_EDITOR_ROWS, columns=SWOT_EDITOR_COLUMNS)
+
+    df = pd.DataFrame(rows)
+    for column in SWOT_EDITOR_COLUMNS:
+        if column not in df.columns:
+            df[column] = "" if column in ("分類", "要因", "備考") else 3.0
+    return df[SWOT_EDITOR_COLUMNS].copy()
+
+
+def _pest_editor_dataframe_from_state(records: List[Dict[str, object]] | None) -> pd.DataFrame:
+    if not records:
+        return pd.DataFrame(DEFAULT_PEST_EDITOR_ROWS, columns=PEST_EDITOR_COLUMNS)
+
+    rows: List[Dict[str, object]] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        dimension = str(record.get("dimension", "")) or PEST_DIMENSION_OPTIONS[0]
+        if dimension not in PEST_DIMENSION_OPTIONS:
+            dimension = PEST_DIMENSION_OPTIONS[0]
+        direction = str(record.get("direction", "")) or PEST_DIRECTION_OPTIONS[0]
+        if direction not in PEST_DIRECTION_OPTIONS:
+            direction = PEST_DIRECTION_OPTIONS[0]
+        try:
+            impact = float(record.get("impact", 3.0))
+        except (TypeError, ValueError):
+            impact = 3.0
+        try:
+            probability = float(record.get("probability", 3.0))
+        except (TypeError, ValueError):
+            probability = 3.0
+        rows.append(
+            {
+                "区分": dimension,
+                "要因": str(record.get("factor", "")),
+                "影響方向": direction,
+                "影響度(1-5)": impact,
+                "確度(1-5)": probability,
+                "備考": str(record.get("note", "")),
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame(DEFAULT_PEST_EDITOR_ROWS, columns=PEST_EDITOR_COLUMNS)
+
+    df = pd.DataFrame(rows)
+    for column in PEST_EDITOR_COLUMNS:
+        if column not in df.columns:
+            df[column] = "" if column in ("区分", "要因", "影響方向", "備考") else 3.0
+    return df[PEST_EDITOR_COLUMNS].copy()
+
+
+def _records_from_swot_editor(df: pd.DataFrame) -> List[Dict[str, object]]:
+    if df is None or df.empty:
+        return []
+
+    sanitized = df.copy()
+    for column in SWOT_EDITOR_COLUMNS:
+        if column not in sanitized.columns:
+            sanitized[column] = "" if column in ("分類", "要因", "備考") else 3.0
+
+    sanitized["分類"] = [
+        value if str(value) in SWOT_CATEGORY_OPTIONS else SWOT_CATEGORY_OPTIONS[0]
+        for value in sanitized["分類"]
+    ]
+    sanitized["要因"] = sanitized["要因"].fillna("").astype(str).str.strip()
+    sanitized["備考"] = sanitized["備考"].fillna("").astype(str)
+    sanitized["重要度(1-5)"] = (
+        pd.to_numeric(sanitized["重要度(1-5)"], errors="coerce")
+        .fillna(3.0)
+        .clip(1.0, 5.0)
+    )
+    sanitized["確度(1-5)"] = (
+        pd.to_numeric(sanitized["確度(1-5)"], errors="coerce")
+        .fillna(3.0)
+        .clip(1.0, 5.0)
+    )
+
+    records: List[Dict[str, object]] = []
+    for _, row in sanitized.iterrows():
+        factor = str(row["要因"]).strip()
+        if not factor:
+            continue
+        records.append(
+            {
+                "category": str(row["分類"]),
+                "factor": factor,
+                "impact": float(row["重要度(1-5)"]),
+                "probability": float(row["確度(1-5)"]),
+                "note": str(row["備考"]),
+            }
+        )
+    return records
+
+
+def _records_from_pest_editor(df: pd.DataFrame) -> List[Dict[str, object]]:
+    if df is None or df.empty:
+        return []
+
+    sanitized = df.copy()
+    for column in PEST_EDITOR_COLUMNS:
+        if column not in sanitized.columns:
+            sanitized[column] = "" if column in ("区分", "要因", "影響方向", "備考") else 3.0
+
+    sanitized["区分"] = [
+        value if str(value) in PEST_DIMENSION_OPTIONS else PEST_DIMENSION_OPTIONS[0]
+        for value in sanitized["区分"]
+    ]
+    sanitized["影響方向"] = [
+        value if str(value) in PEST_DIRECTION_OPTIONS else PEST_DIRECTION_OPTIONS[0]
+        for value in sanitized["影響方向"]
+    ]
+    sanitized["要因"] = sanitized["要因"].fillna("").astype(str).str.strip()
+    sanitized["備考"] = sanitized["備考"].fillna("").astype(str)
+    sanitized["影響度(1-5)"] = (
+        pd.to_numeric(sanitized["影響度(1-5)"], errors="coerce")
+        .fillna(3.0)
+        .clip(1.0, 5.0)
+    )
+    sanitized["確度(1-5)"] = (
+        pd.to_numeric(sanitized["確度(1-5)"], errors="coerce")
+        .fillna(3.0)
+        .clip(1.0, 5.0)
+    )
+
+    records: List[Dict[str, object]] = []
+    for _, row in sanitized.iterrows():
+        factor = str(row["要因"]).strip()
+        if not factor:
+            continue
+        records.append(
+            {
+                "dimension": str(row["区分"]),
+                "factor": factor,
+                "direction": str(row["影響方向"]),
+                "impact": float(row["影響度(1-5)"]),
+                "probability": float(row["確度(1-5)"]),
+                "note": str(row["備考"]),
+            }
+        )
+    return records
+
+
 def _build_snapshot_payload() -> Dict[str, object]:
     """Collect the current session state into a serialisable snapshot."""
 
@@ -307,6 +506,7 @@ def _build_snapshot_payload() -> Dict[str, object]:
         "what_if_scenarios": st.session_state.get("what_if_scenarios", {}),
         "business_context": st.session_state.get(BUSINESS_CONTEXT_KEY, {}),
         "financial_timeseries": st.session_state.get(FINANCIAL_SERIES_STATE_KEY, {}),
+        "strategic_analysis": st.session_state.get(STRATEGIC_ANALYSIS_KEY, {}),
         "generated_at": datetime.utcnow().isoformat(),
     }
     scenario_df_state = st.session_state.get("scenario_df")
@@ -353,6 +553,16 @@ def _hydrate_snapshot(snapshot: Dict[str, object]) -> bool:
         st.session_state[BUSINESS_CONTEXT_KEY] = snapshot["business_context"]
     if "financial_timeseries" in snapshot and isinstance(snapshot["financial_timeseries"], dict):
         st.session_state[FINANCIAL_SERIES_STATE_KEY] = snapshot["financial_timeseries"]
+    if "strategic_analysis" in snapshot and isinstance(snapshot["strategic_analysis"], dict):
+        strategic_snapshot = snapshot["strategic_analysis"]
+        swot_records = strategic_snapshot.get("swot") if isinstance(strategic_snapshot.get("swot"), list) else []
+        pest_records = strategic_snapshot.get("pest") if isinstance(strategic_snapshot.get("pest"), list) else []
+        st.session_state[STRATEGIC_ANALYSIS_KEY] = {
+            "swot": swot_records,
+            "pest": pest_records,
+        }
+        st.session_state["swot_editor_df"] = _swot_editor_dataframe_from_state(swot_records)
+        st.session_state["pest_editor_df"] = _pest_editor_dataframe_from_state(pest_records)
     return True
 
 
@@ -1683,6 +1893,25 @@ if BUSINESS_CONTEXT_KEY not in st.session_state:
     st.session_state[BUSINESS_CONTEXT_KEY] = BUSINESS_CONTEXT_TEMPLATE.copy()
 context_state: Dict[str, str] = st.session_state[BUSINESS_CONTEXT_KEY]
 
+if (
+    STRATEGIC_ANALYSIS_KEY not in st.session_state
+    or not isinstance(st.session_state[STRATEGIC_ANALYSIS_KEY], dict)
+):
+    st.session_state[STRATEGIC_ANALYSIS_KEY] = {"swot": [], "pest": []}
+strategic_state: Dict[str, object] = st.session_state[STRATEGIC_ANALYSIS_KEY]
+if "swot" not in strategic_state:
+    strategic_state["swot"] = []
+if "pest" not in strategic_state:
+    strategic_state["pest"] = []
+if "swot_editor_df" not in st.session_state:
+    st.session_state["swot_editor_df"] = _swot_editor_dataframe_from_state(
+        strategic_state.get("swot") if isinstance(strategic_state.get("swot"), list) else []
+    )
+if "pest_editor_df" not in st.session_state:
+    st.session_state["pest_editor_df"] = _pest_editor_dataframe_from_state(
+        strategic_state.get("pest") if isinstance(strategic_state.get("pest"), list) else []
+    )
+
 if BUSINESS_CONTEXT_SNAPSHOT_KEY not in st.session_state:
     st.session_state[BUSINESS_CONTEXT_SNAPSHOT_KEY] = {
         key: str(context_state.get(key, "")) for key in BUSINESS_CONTEXT_TEMPLATE
@@ -1840,6 +2069,102 @@ if current_step == "context":
         height=140,
     )
     st.caption("※ 記入した内容はウィザード内で保持され、事業計画書作成時の定性情報として活用できます。")
+
+    st.markdown("#### SWOT分析（内部・外部要因の整理）")
+    st.caption("強み・弱み・機会・脅威を1〜5段階で評価し、優先度の高い論点を定量的に把握します。")
+    swot_editor_df = st.data_editor(
+        st.session_state.get("swot_editor_df", _swot_editor_dataframe_from_state([])),
+        num_rows="dynamic",
+        hide_index=True,
+        column_config={
+            "分類": st.column_config.SelectboxColumn(
+                "分類",
+                options=list(SWOT_CATEGORY_OPTIONS),
+                help="Strength/Weakness/Opportunity/Threatから選択します。",
+            ),
+            "要因": st.column_config.TextColumn(
+                "要因",
+                help="例：独自アルゴリズムによる高い技術力など。1行に1項目で記入します。",
+            ),
+            "重要度(1-5)": st.column_config.NumberColumn(
+                "重要度 (1-5)",
+                min_value=1.0,
+                max_value=5.0,
+                step=0.5,
+                format="%.1f",
+                help="経営インパクトの大きさを評価します。5が最大。",
+            ),
+            "確度(1-5)": st.column_config.NumberColumn(
+                "確度 (1-5)",
+                min_value=1.0,
+                max_value=5.0,
+                step=0.5,
+                format="%.1f",
+                help="発生・維持の確度を評価します。5が確実。",
+            ),
+            "備考": st.column_config.TextColumn(
+                "備考",
+                help="補足メモや根拠、関連する指標を記入できます。",
+            ),
+        },
+        key="swot_editor",
+        **use_container_width_kwargs(st.data_editor),
+    )
+    st.session_state["swot_editor_df"] = swot_editor_df
+
+    st.markdown("#### PEST分析（外部環境の変化）")
+    st.caption(
+        "政治(Political)・経済(Economic)・社会(Social)・技術(Technological)の外部要因と機会/脅威を評価します。"
+    )
+    pest_editor_df = st.data_editor(
+        st.session_state.get("pest_editor_df", _pest_editor_dataframe_from_state([])),
+        num_rows="dynamic",
+        hide_index=True,
+        column_config={
+            "区分": st.column_config.SelectboxColumn(
+                "区分",
+                options=list(PEST_DIMENSION_OPTIONS),
+                help="PESTの区分を選択します。",
+            ),
+            "要因": st.column_config.TextColumn(
+                "要因",
+                help="例：補助金制度の拡充、金利上昇、消費者価値観の変化など。",
+            ),
+            "影響方向": st.column_config.SelectboxColumn(
+                "影響方向",
+                options=list(PEST_DIRECTION_OPTIONS),
+                help="自社にとって機会か脅威かを選択します。",
+            ),
+            "影響度(1-5)": st.column_config.NumberColumn(
+                "影響度 (1-5)",
+                min_value=1.0,
+                max_value=5.0,
+                step=0.5,
+                format="%.1f",
+                help="ビジネスへの影響の大きさを評価します。",
+            ),
+            "確度(1-5)": st.column_config.NumberColumn(
+                "確度 (1-5)",
+                min_value=1.0,
+                max_value=5.0,
+                step=0.5,
+                format="%.1f",
+                help="要因が顕在化する確からしさを評価します。",
+            ),
+            "備考": st.column_config.TextColumn(
+                "備考",
+                help="情報源や想定シナリオなどを記載します。",
+            ),
+        },
+        key="pest_editor",
+        **use_container_width_kwargs(st.data_editor),
+    )
+    st.session_state["pest_editor_df"] = pest_editor_df
+
+    current_analysis_state = dict(st.session_state.get(STRATEGIC_ANALYSIS_KEY, {}))
+    current_analysis_state["swot"] = _records_from_swot_editor(swot_editor_df)
+    current_analysis_state["pest"] = _records_from_pest_editor(pest_editor_df)
+    st.session_state[STRATEGIC_ANALYSIS_KEY] = current_analysis_state
 
 elif current_step == "sales":
     _maybe_show_tutorial("sales", "客数×単価×頻度の分解で売上を見積もると改善ポイントが見えます。")
