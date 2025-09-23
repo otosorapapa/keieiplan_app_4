@@ -1,7 +1,15 @@
 from decimal import Decimal
 import unittest
 
-from models import CostPlan, EstimateRange, MonthlySeries, SalesItem, SalesPlan
+from models import (
+    CostPlan,
+    EstimateRange,
+    LoanItem,
+    LoanSchedule,
+    MonthlySeries,
+    SalesItem,
+    SalesPlan,
+)
 
 
 class EstimateRangeTests(unittest.TestCase):
@@ -106,6 +114,47 @@ class CostPlanRangeTests(unittest.TestCase):
         self.assertEqual(negative_totals["variable"].minimum, Decimal("0"))
         self.assertEqual(negative_totals["variable"].typical, Decimal("0"))
         self.assertEqual(negative_totals["variable"].maximum, Decimal("0"))
+
+
+class LoanScheduleTests(unittest.TestCase):
+    def test_equal_principal_schedule(self) -> None:
+        loan = LoanItem(
+            name="Main Bank",
+            principal=Decimal("120000"),
+            interest_rate=Decimal("0.12"),
+            term_months=12,
+            start_month=1,
+            repayment_type="equal_principal",
+        )
+        schedule = loan.amortization_schedule()
+        self.assertEqual(len(schedule), 12)
+        self.assertAlmostEqual(float(schedule[0].interest), 1200.0, places=2)
+        self.assertEqual(schedule[-1].balance, Decimal("0"))
+        total_principal = sum(entry.principal for entry in schedule)
+        self.assertEqual(total_principal, Decimal("120000"))
+
+        loan_schedule = LoanSchedule(loans=[loan])
+        first_year_interest = sum(entry.interest for entry in schedule if entry.year == 1)
+        self.assertAlmostEqual(
+            float(loan_schedule.annual_interest()),
+            float(first_year_interest),
+            places=6,
+        )
+
+    def test_interest_only_schedule(self) -> None:
+        loan = LoanItem(
+            name="Short Term",
+            principal=Decimal("50000"),
+            interest_rate=Decimal("0.05"),
+            term_months=6,
+            start_month=1,
+            repayment_type="interest_only",
+        )
+        schedule = loan.amortization_schedule()
+        self.assertEqual(len(schedule), 6)
+        self.assertTrue(all(entry.principal == Decimal("0") for entry in schedule[:-1]))
+        self.assertEqual(schedule[-1].principal, Decimal("50000"))
+        self.assertEqual(schedule[-1].balance, Decimal("0"))
 
 
 if __name__ == "__main__":  # pragma: no cover

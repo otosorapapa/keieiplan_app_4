@@ -322,6 +322,20 @@ class CapexItem(BaseModel):
         life_months = Decimal(self.useful_life_years * 12)
         return self.amount / (life_months / Decimal("12"))
 
+    def payment_schedule(self) -> List["CapexPayment"]:
+        month_index = int(self.start_month)
+        year = (month_index - 1) // 12 + 1
+        month = ((month_index - 1) % 12) + 1
+        return [
+            CapexPayment(
+                name=self.name,
+                amount=self.amount,
+                absolute_month=month_index,
+                year=year,
+                month=month,
+            )
+        ]
+
 
 class CapexPlan(BaseModel):
     items: List[CapexItem] = Field(default_factory=list)
@@ -331,6 +345,18 @@ class CapexPlan(BaseModel):
 
     def total_investment(self) -> Decimal:
         return sum((item.amount for item in self.items), start=Decimal("0"))
+
+    def payment_schedule(self) -> List["CapexPayment"]:
+        schedule: List[CapexPayment] = []
+        for item in self.items:
+            schedule.extend(item.payment_schedule())
+        return sorted(schedule, key=lambda entry: entry.absolute_month)
+
+    def payments_by_month(self) -> Dict[int, Decimal]:
+        schedule: Dict[int, Decimal] = {}
+        for entry in self.payment_schedule():
+            schedule[entry.absolute_month] = schedule.get(entry.absolute_month, Decimal("0")) + entry.amount
+        return schedule
 
 
 class LoanItem(BaseModel):
@@ -363,7 +389,52 @@ class LoanItem(BaseModel):
         return self
 
     def annual_interest(self) -> Decimal:
-        return self.principal * self.interest_rate
+        total = Decimal("0")
+        for entry in self.amortization_schedule():
+            if entry.year != 1:
+                break
+            total += entry.interest
+        return total
+
+    def amortization_schedule(self) -> List["LoanPayment"]:
+        schedule: List[LoanPayment] = []
+        outstanding = self.principal
+        if outstanding <= 0:
+            return schedule
+        monthly_rate = self.interest_rate / Decimal("12")
+        base_principal = (
+            self.principal / Decimal(self.term_months)
+            if self.repayment_type == "equal_principal" and self.term_months > 0
+            else Decimal("0")
+        )
+        for offset in range(self.term_months):
+            absolute_month = int(self.start_month) + offset
+            year = (absolute_month - 1) // 12 + 1
+            month = ((absolute_month - 1) % 12) + 1
+            interest_payment = outstanding * monthly_rate
+            principal_payment = base_principal
+            if self.repayment_type == "interest_only":
+                principal_payment = Decimal("0")
+            if offset == self.term_months - 1:
+                principal_payment = outstanding
+            principal_payment = min(principal_payment, outstanding)
+            ending_balance = outstanding - principal_payment
+            schedule.append(
+                LoanPayment(
+                    loan_name=self.name,
+                    period_index=offset + 1,
+                    absolute_month=absolute_month,
+                    year=year,
+                    month=month,
+                    interest=interest_payment,
+                    principal=principal_payment,
+                    balance=ending_balance,
+                )
+            )
+            outstanding = ending_balance
+            if outstanding <= Decimal("0"):
+                break
+        return schedule
 
 
 class LoanSchedule(BaseModel):
@@ -374,6 +445,83 @@ class LoanSchedule(BaseModel):
 
     def outstanding_principal(self) -> Decimal:
         return sum((loan.principal for loan in self.loans), start=Decimal("0"))
+
+    def amortization_schedule(self) -> List["LoanPayment"]:
+        schedule: List[LoanPayment] = []
+        for loan in self.loans:
+            schedule.extend(loan.amortization_schedule())
+        return sorted(schedule, key=lambda entry: (entry.absolute_month, entry.loan_name))
+
+    def debt_service_by_month(self) -> Dict[int, Dict[str, Decimal]]:
+        schedule: Dict[int, Dict[str, Decimal]] = {}
+        for entry in self.amortization_schedule():
+            month_entry = schedule.setdefault(
+                entry.absolute_month,
+                {"interest": Decimal("0"), "principal": Decimal("0")},
+            )
+            month_entry["interest"] += entry.interest
+            month_entry["principal"] += entry.principal
+        return schedule
+
+    def annual_debt_service(self) -> Dict[int, Dict[str, Decimal]]:
+        annual: Dict[int, Dict[str, Decimal]] = {}
+        for entry in self.amortization_schedule():
+            year_entry = annual.setdefault(
+                entry.year,
+                {"interest": Decimal("0"), "principal": Decimal("0")},
+            )
+            year_entry["interest"] += entry.interest
+            year_entry["principal"] += entry.principal
+        return annual
+
+    def weighted_average_interest_rate(self) -> Decimal:
+        total_principal = sum((loan.principal for loan in self.loans), start=Decimal("0"))
+        if total_principal <= Decimal("0"):
+            return Decimal("0")
+        weighted_sum = sum((loan.principal * loan.interest_rate for loan in self.loans), start=Decimal("0"))
+        return weighted_sum / total_principal
+
+
+@dataclass(frozen=True)
+class CapexPayment:
+    name: str
+    amount: Decimal
+    absolute_month: int
+    year: int
+    month: int
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "name": self.name,
+            "amount": self.amount,
+            "absolute_month": self.absolute_month,
+            "year": self.year,
+            "month": self.month,
+        }
+
+
+@dataclass(frozen=True)
+class LoanPayment:
+    loan_name: str
+    period_index: int
+    absolute_month: int
+    year: int
+    month: int
+    interest: Decimal
+    principal: Decimal
+    balance: Decimal
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "loan_name": self.loan_name,
+            "period": self.period_index,
+            "absolute_month": self.absolute_month,
+            "year": self.year,
+            "month": self.month,
+            "interest": self.interest,
+            "principal": self.principal,
+            "balance": self.balance,
+        }
 
 
 class TaxPolicy(BaseModel):

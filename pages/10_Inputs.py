@@ -21,7 +21,11 @@ from models import (
     INDUSTRY_TEMPLATES,
     MONTH_SEQUENCE,
     EstimateRange,
+    CapexPlan,
+    LoanSchedule,
 )
+from calc import compute, generate_cash_flow, plan_from_models
+from pydantic import ValidationError
 from state import ensure_session_defaults
 from services import auth
 from services.auth import AuthError
@@ -1247,6 +1251,70 @@ def _loan_dataframe(data: Dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _serialize_capex_editor_df(df: pd.DataFrame) -> Dict[str, object]:
+    items: List[Dict[str, object]] = []
+    for _, row in df.iterrows():
+        raw_amount = row.get("金額", 0)
+        try:
+            amount = Decimal(str(0 if pd.isna(raw_amount) else raw_amount))
+        except Exception:
+            continue
+        if amount <= 0:
+            continue
+        name = ("" if pd.isna(row.get("投資名", "")) else str(row.get("投資名", ""))).strip() or "未設定"
+        raw_start = row.get("開始月", 1)
+        start_month = int(raw_start if not pd.isna(raw_start) else 1)
+        raw_life = row.get("耐用年数", 5)
+        useful_life = int(raw_life if not pd.isna(raw_life) else 5)
+        items.append(
+            {
+                "name": name,
+                "amount": amount,
+                "start_month": max(1, min(12, start_month)),
+                "useful_life_years": max(1, useful_life),
+            }
+        )
+    return {"items": items}
+
+
+def _serialize_loan_editor_df(df: pd.DataFrame) -> Dict[str, object]:
+    loans: List[Dict[str, object]] = []
+    for _, row in df.iterrows():
+        raw_principal = row.get("元本", 0)
+        try:
+            principal = Decimal(str(0 if pd.isna(raw_principal) else raw_principal))
+        except Exception:
+            continue
+        if principal <= 0:
+            continue
+        raw_rate = row.get("金利", 0)
+        try:
+            interest_rate = Decimal(str(0 if pd.isna(raw_rate) else raw_rate))
+        except Exception:
+            interest_rate = Decimal("0")
+        raw_term = row.get("返済期間(月)", 12)
+        term_months = int(raw_term if not pd.isna(raw_term) else 12)
+        raw_start = row.get("開始月", 1)
+        start_month = int(raw_start if not pd.isna(raw_start) else 1)
+        repayment_type = row.get("返済タイプ", "equal_principal")
+        repayment_value = (
+            str(repayment_type)
+            if str(repayment_type) in {"equal_principal", "interest_only"}
+            else "equal_principal"
+        )
+        loans.append(
+            {
+                "name": ("" if pd.isna(row.get("名称", "")) else str(row.get("名称", ""))).strip() or "借入",
+                "principal": principal,
+                "interest_rate": interest_rate,
+                "term_months": max(1, term_months),
+                "start_month": max(1, min(12, start_month)),
+                "repayment_type": repayment_value,
+            }
+        )
+    return {"loans": loans}
+
+
 sales_defaults_df = _sales_dataframe(finance_raw.get("sales", {}))
 _ensure_sales_template_state(sales_defaults_df)
 stored_sales_df = st.session_state.get(SALES_TEMPLATE_STATE_KEY, sales_defaults_df)
@@ -2288,6 +2356,112 @@ elif current_step == "invest":
     )
     st.session_state["loan_editor_df"] = loan_editor_df
 
+    capex_payload = _serialize_capex_editor_df(capex_editor_df)
+    loan_payload = _serialize_loan_editor_df(loan_editor_df)
+
+    capex_preview: CapexPlan | None
+    loan_preview: LoanSchedule | None
+    try:
+        capex_preview = CapexPlan(**capex_payload)
+    except ValidationError:
+        capex_preview = None
+    try:
+        loan_preview = LoanSchedule(**loan_payload)
+    except ValidationError:
+        loan_preview = None
+
+    st.markdown("#### 入力内容のプレビュー")
+    preview_cols = st.columns(2)
+    with preview_cols[0]:
+        st.markdown("##### 設備投資スケジュール")
+        if capex_preview and capex_preview.items:
+            capex_rows = [
+                {
+                    "投資名": payment.name,
+                    "支払タイミング": f"FY{int(payment.year)} 月{int(payment.month):02d}",
+                    "支払額": format_amount_with_unit(payment.amount, "円"),
+                }
+                for payment in capex_preview.payment_schedule()
+            ]
+            capex_preview_df = pd.DataFrame(capex_rows)
+            st.dataframe(
+                capex_preview_df,
+                hide_index=True,
+                **use_container_width_kwargs(st.dataframe),
+            )
+        else:
+            st.info("正の金額で投資を入力するとここにスケジュールが表示されます。")
+    with preview_cols[1]:
+        st.markdown("##### 借入返済表 (初期) ")
+        if loan_preview and loan_preview.loans:
+            amortization = loan_preview.amortization_schedule()
+            preview_rows = [
+                {
+                    "ローン": entry.loan_name,
+                    "時期": f"FY{int(entry.year)} 月{int(entry.month):02d}",
+                    "利息": format_amount_with_unit(entry.interest, "円"),
+                    "元金": format_amount_with_unit(entry.principal, "円"),
+                    "残高": format_amount_with_unit(entry.balance, "円"),
+                }
+                for entry in amortization[:36]
+            ]
+            loan_preview_df = pd.DataFrame(preview_rows)
+            st.dataframe(
+                loan_preview_df,
+                hide_index=True,
+                **use_container_width_kwargs(st.dataframe),
+            )
+            if len(amortization) > 36:
+                st.caption("※ 37ヶ月目以降はAnalysisタブの詳細スケジュールで確認できます。")
+        else:
+            st.info("元本・金利・返済期間を入力すると返済スケジュールを自動計算します。")
+
+    preview_cf_data: Dict[str, object] | None = None
+    preview_issues: List[ValidationIssue] = []
+    if capex_preview and loan_preview:
+        preview_raw = dict(finance_raw)
+        preview_raw["capex"] = capex_payload
+        preview_raw["loans"] = loan_payload
+        preview_bundle, preview_issues = validate_bundle(preview_raw)
+        if preview_bundle:
+            fte_value = Decimal(str(settings_state.get("fte", 20)))
+            plan_preview = plan_from_models(
+                preview_bundle.sales,
+                preview_bundle.costs,
+                preview_bundle.capex,
+                preview_bundle.loans,
+                preview_bundle.tax,
+                fte=fte_value,
+                unit=unit,
+            )
+            preview_amounts = compute(plan_preview)
+            preview_cf_data = generate_cash_flow(
+                preview_amounts,
+                preview_bundle.capex,
+                preview_bundle.loans,
+                preview_bundle.tax,
+            )
+
+    if preview_cf_data and isinstance(preview_cf_data, dict):
+        metrics_preview = preview_cf_data.get("investment_metrics", {})
+        if isinstance(metrics_preview, dict) and metrics_preview.get("monthly_cash_flows"):
+            st.markdown("#### 投資評価プレビュー")
+            payback_val = metrics_preview.get("payback_period_years")
+            npv_val = Decimal(str(metrics_preview.get("npv", Decimal("0"))))
+            discount_val = Decimal(str(metrics_preview.get("discount_rate", Decimal("0"))))
+            metric_cols = st.columns(3)
+            with metric_cols[0]:
+                payback_text = "—"
+                if payback_val is not None:
+                    payback_text = f"{float(Decimal(str(payback_val))):.1f}年"
+                st.metric("投資回収期間", payback_text)
+            with metric_cols[1]:
+                st.metric("NPV", format_amount_with_unit(npv_val, "円"))
+            with metric_cols[2]:
+                st.metric("割引率", f"{float(discount_val) * 100:.1f}%")
+    elif preview_issues:
+        st.info("他のステップに未入力またはエラーがあるため、投資指標の試算は保存後に計算されます。")
+
     if any(err.field.startswith("capex") for err in validation_errors):
         messages = "<br/>".join(
             err.message for err in validation_errors if err.field.startswith("capex")
@@ -2450,63 +2624,10 @@ elif current_step == "tax":
                 costs_data["range_profiles"] = range_profiles
 
             capex_df = pd.DataFrame(st.session_state.get("capex_editor_df", capex_defaults_df))
-            capex_data = {
-                "items": [
-                    {
-                        "name": ("" if pd.isna(row.get("投資名", "")) else str(row.get("投資名", ""))).strip()
-                        or "未設定",
-                        "amount": Decimal(
-                            str(row.get("金額", 0) if not pd.isna(row.get("金額", 0)) else 0)
-                        ),
-                        "start_month": int(
-                            row.get("開始月", 1) if not pd.isna(row.get("開始月", 1)) else 1
-                        ),
-                        "useful_life_years": int(
-                            row.get("耐用年数", 5) if not pd.isna(row.get("耐用年数", 5)) else 5
-                        ),
-                    }
-                    for _, row in capex_df.iterrows()
-                    if Decimal(
-                        str(row.get("金額", 0) if not pd.isna(row.get("金額", 0)) else 0)
-                    )
-                    > 0
-                ]
-            }
+            capex_data = _serialize_capex_editor_df(capex_df)
 
             loan_df = pd.DataFrame(st.session_state.get("loan_editor_df", loan_defaults_df))
-            loan_data = {
-                "loans": [
-                    {
-                        "name": ("" if pd.isna(row.get("名称", "")) else str(row.get("名称", ""))).strip()
-                        or "借入",
-                        "principal": Decimal(
-                            str(row.get("元本", 0) if not pd.isna(row.get("元本", 0)) else 0)
-                        ),
-                        "interest_rate": Decimal(
-                            str(row.get("金利", 0) if not pd.isna(row.get("金利", 0)) else 0)
-                        ),
-                        "term_months": int(
-                            row.get("返済期間(月)", 12)
-                            if not pd.isna(row.get("返済期間(月)", 12))
-                            else 12
-                        ),
-                        "start_month": int(
-                            row.get("開始月", 1) if not pd.isna(row.get("開始月", 1)) else 1
-                        ),
-                        "repayment_type": (
-                            row.get("返済タイプ", "equal_principal")
-                            if row.get("返済タイプ", "equal_principal")
-                            in {"equal_principal", "interest_only"}
-                            else "equal_principal"
-                        ),
-                    }
-                    for _, row in loan_df.iterrows()
-                    if Decimal(
-                        str(row.get("元本", 0) if not pd.isna(row.get("元本", 0)) else 0)
-                    )
-                    > 0
-                ]
-            }
+            loan_data = _serialize_loan_editor_df(loan_df)
 
             tax_data = {
                 "corporate_tax_rate": Decimal(str(corporate_rate)),
