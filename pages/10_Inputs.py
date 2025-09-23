@@ -5,8 +5,9 @@ import io
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -268,10 +269,29 @@ def _update_cost_range_state_from_editor(updated: pd.DataFrame) -> None:
         code = str(row.get("コード", "")).strip()
         if not code:
             continue
-        minimum = float(max(0.0, row.get("最小", 0.0) or 0.0))
-        typical = float(max(0.0, row.get("中央値", minimum) or minimum))
-        maximum = float(max(typical, row.get("最大", typical) or typical))
-        state[code] = {"min": minimum, "typical": typical, "max": maximum}
+        raw_min = row.get("最小 (％)", row.get("最小", 0.0) or 0.0)
+        raw_typical = row.get("中央値 (％)", row.get("中央値", raw_min) or raw_min)
+        raw_max = row.get("最大 (％)", row.get("最大", raw_typical) or raw_typical)
+        try:
+            minimum = float(raw_min)
+        except (TypeError, ValueError):
+            minimum = 0.0
+        try:
+            typical = float(raw_typical)
+        except (TypeError, ValueError):
+            typical = minimum
+        try:
+            maximum = float(raw_max)
+        except (TypeError, ValueError):
+            maximum = typical
+        minimum = max(0.0, minimum)
+        typical = max(minimum, typical)
+        maximum = max(typical, maximum)
+        if code in VARIABLE_RATIO_CODES:
+            factor = 0.01
+        else:
+            factor = 1.0
+        state[code] = {"min": minimum * factor, "typical": typical * factor, "max": maximum * factor}
     st.session_state[COST_RANGE_STATE_KEY] = state
 
 
@@ -642,27 +662,27 @@ def _format_timestamp(value: object) -> str:
 VARIABLE_RATIO_FIELDS = [
     (
         "COGS_MAT",
-        "材料費 原価率",
+        "材料費率 (％)",
         "材料費＝製品・サービス提供に使う原材料コスト。粗利益率＝(売上−売上原価)÷売上。製造業では30%を超えると優良とされます。",
     ),
     (
         "COGS_LBR",
-        "外部労務費 原価率",
+        "外部労務費率 (％)",
         "外部労務費＝外部人材への支払い。繁忙期の稼働計画を踏まえて設定しましょう。",
     ),
     (
         "COGS_OUT_SRC",
-        "外注費(専属) 原価率",
-        "専属パートナーに支払うコスト。受注量に応じた歩合を想定します。",
+        "外注加工費率(専属) (％)",
+        "専属パートナーに支払う加工コスト。受注量に応じた歩合を想定します。",
     ),
     (
         "COGS_OUT_CON",
-        "外注費(委託) 原価率",
+        "外注加工費率(委託) (％)",
         "スポットで委託するコスト。最低発注量やキャンセル料も考慮してください。",
     ),
     (
         "COGS_OTH",
-        "その他原価率",
+        "その他原価率 (％)",
         "その他の仕入や物流費など。粗利益率が目標レンジに収まるか確認しましょう。",
     ),
 ]
@@ -671,19 +691,86 @@ FIXED_COST_FIELDS = [
     (
         "OPEX_H",
         "人件費",
+        "固定費",
         "正社員・パート・役員報酬などを合算。採用・昇給計画をメモに残すと振り返りやすくなります。",
-    ),
-    (
-        "OPEX_K",
-        "経費",
-        "家賃・広告宣伝・通信費などの販管費。固定化している支出を中心に入力します。",
     ),
     (
         "OPEX_DEP",
         "減価償却費",
+        "固定費",
         "過去投資の償却費。税務上の耐用年数を確認しましょう。",
     ),
+    (
+        "OPEX_AD",
+        "広告宣伝費",
+        "販管費",
+        "集客・販促のための広告費。キャンペーン計画と連動させて見直しましょう。",
+    ),
+    (
+        "OPEX_UTIL",
+        "水道光熱費",
+        "販管費",
+        "電気・ガス・水道などのエネルギーコスト。省エネ対策の効果測定に役立ちます。",
+    ),
+    (
+        "OPEX_OTH",
+        "その他販管費",
+        "販管費",
+        "通信費や備品費などその他の販管費。大きな支出はメモに残しておきましょう。",
+    ),
 ]
+
+FIXED_COST_CATEGORY = {code: category for code, _, category, _ in FIXED_COST_FIELDS}
+
+LEGACY_OPEX_CODE = "OPEX_K"
+LEGACY_OPEX_SPLIT = {
+    "OPEX_AD": Decimal("0.4"),
+    "OPEX_UTIL": Decimal("0.2"),
+    "OPEX_OTH": Decimal("0.4"),
+}
+
+
+def _migrate_fixed_cost_payloads(
+    fixed_costs: Dict[str, object], range_profiles: Dict[str, object]
+) -> Tuple[Dict[str, object], Dict[str, object]]:
+    migrated_costs = {str(key): value for key, value in fixed_costs.items()}
+    migrated_ranges = {str(key): value for key, value in range_profiles.items()}
+
+    if LEGACY_OPEX_CODE in migrated_costs and not any(
+        code in migrated_costs for code in LEGACY_OPEX_SPLIT
+    ):
+        legacy_amount = Decimal(str(migrated_costs.pop(LEGACY_OPEX_CODE, 0.0)))
+        for code, ratio in LEGACY_OPEX_SPLIT.items():
+            if code not in migrated_costs:
+                migrated_costs[code] = float(legacy_amount * ratio)
+
+    if LEGACY_OPEX_CODE in migrated_ranges and not any(
+        code in migrated_ranges for code in LEGACY_OPEX_SPLIT
+    ):
+        payload = migrated_ranges.pop(LEGACY_OPEX_CODE)
+        if isinstance(payload, EstimateRange):
+            base_profile = {
+                "minimum": payload.minimum,
+                "typical": payload.typical,
+                "maximum": payload.maximum,
+            }
+        elif isinstance(payload, dict):
+            base_profile = {
+                "minimum": Decimal(str(payload.get("minimum", 0.0))),
+                "typical": Decimal(str(payload.get("typical", 0.0))),
+                "maximum": Decimal(str(payload.get("maximum", 0.0))),
+            }
+        else:
+            base_profile = None
+        if base_profile:
+            for code, ratio in LEGACY_OPEX_SPLIT.items():
+                migrated_ranges[code] = {
+                    "minimum": float(base_profile["minimum"] * ratio),
+                    "typical": float(base_profile["typical"] * ratio),
+                    "maximum": float(base_profile["maximum"] * ratio),
+                }
+
+    return migrated_costs, migrated_ranges
 
 NOI_FIELDS = [
     (
@@ -717,7 +804,7 @@ NOE_FIELDS = [
 ]
 
 VARIABLE_RATIO_CODES = {code for code, _, _ in VARIABLE_RATIO_FIELDS}
-FIXED_COST_CODES = {code for code, _, _ in FIXED_COST_FIELDS}
+FIXED_COST_CODES = {code for code, _, _, _ in FIXED_COST_FIELDS}
 NOI_CODES = {code for code, _, _ in NOI_FIELDS}
 NOE_CODES = {code for code, _, _ in NOE_FIELDS}
 
@@ -913,7 +1000,7 @@ def _yen_number_input(
         "min_value": float(min_value),
         "step": float(step),
         "value": float(value),
-        "format": "¥%.0f",
+        "format": "%.0f",
     }
     if max_value is not None:
         kwargs["max_value"] = float(max_value)
@@ -929,23 +1016,28 @@ def _percent_number_input(
     *,
     value: float,
     min_value: float = 0.0,
-    max_value: float = 1.0,
+    max_value: float | None = 1.0,
     step: float = 0.01,
     key: str | None = None,
     help: str | None = None,
 ) -> float:
+    display_value = float(value) * 100.0
+    display_min = float(min_value) * 100.0
+    display_step = float(step) * 100.0 if step else 1.0
     kwargs = {
-        "min_value": float(min_value),
-        "max_value": float(max_value),
-        "step": float(step),
-        "value": float(value),
-        "format": "%.2f%%",
+        "min_value": display_min,
+        "step": display_step,
+        "value": display_value,
+        "format": "%.2f",
     }
+    if max_value is not None:
+        kwargs["max_value"] = float(max_value) * 100.0
     if key is not None:
         kwargs["key"] = key
     if help is not None:
         kwargs["help"] = help
-    return float(st.number_input(label, **kwargs))
+    result = float(st.number_input(label, **kwargs))
+    return result / 100.0
 
 
 def _render_sales_guide_panel() -> None:
@@ -1168,8 +1260,14 @@ capex_defaults_df = _capex_dataframe(finance_raw.get("capex", {}))
 loan_defaults_df = _loan_dataframe(finance_raw.get("loans", {}))
 
 costs_defaults = finance_raw.get("costs", {})
+fixed_costs_raw = dict(costs_defaults.get("fixed_costs", {}))
+range_defaults_raw = dict(costs_defaults.get("range_profiles", {}))
+fixed_costs, migrated_ranges = _migrate_fixed_cost_payloads(fixed_costs_raw, range_defaults_raw)
+costs_defaults["fixed_costs"] = fixed_costs
+costs_defaults["range_profiles"] = migrated_ranges
+finance_raw.setdefault("costs", costs_defaults)
+
 variable_ratios = costs_defaults.get("variable_ratios", {})
-fixed_costs = costs_defaults.get("fixed_costs", {})
 noi_defaults = costs_defaults.get("non_operating_income", {})
 noe_defaults = costs_defaults.get("non_operating_expenses", {})
 
@@ -1253,8 +1351,13 @@ def _variable_inputs_from_state(defaults: Dict[str, object]) -> Dict[str, float]
     values: Dict[str, float] = {}
     for code, _, _ in VARIABLE_RATIO_FIELDS:
         key = f"var_ratio_{code}"
-        default_value = float(defaults.get(code, 0.0))
-        values[code] = float(st.session_state.get(key, default_value))
+        default_ratio = float(defaults.get(code, 0.0))
+        stored_value = st.session_state.get(key, default_ratio * 100.0)
+        try:
+            ratio = float(stored_value) / 100.0
+        except (TypeError, ValueError):
+            ratio = default_ratio
+        values[code] = max(0.0, min(1.0, ratio))
     return values
 
 
@@ -1265,7 +1368,8 @@ def _monetary_inputs_from_state(
     unit_factor: Decimal,
 ) -> Dict[str, float]:
     values: Dict[str, float] = {}
-    for code, _, _ in fields:
+    for field in fields:
+        code = field[0]
         key = f"{prefix}_{code}"
         default_value = float(Decimal(str(defaults.get(code, 0.0))) / unit_factor)
         values[code] = float(st.session_state.get(key, default_value))
@@ -1294,8 +1398,9 @@ if "loan_editor_df" not in st.session_state:
     st.session_state["loan_editor_df"] = loan_defaults_df.copy()
 
 for code, _, _ in VARIABLE_RATIO_FIELDS:
-    st.session_state.setdefault(f"var_ratio_{code}", float(variable_ratios.get(code, 0.0)))
-for code, _, _ in FIXED_COST_FIELDS:
+    default_ratio = float(variable_ratios.get(code, 0.0))
+    st.session_state.setdefault(f"var_ratio_{code}", default_ratio * 100.0)
+for code, _, _, _ in FIXED_COST_FIELDS:
     default_value = float(Decimal(str(fixed_costs.get(code, 0.0))) / unit_factor)
     st.session_state.setdefault(f"fixed_cost_{code}", default_value)
 for code, _, _ in NOI_FIELDS:
@@ -1572,15 +1677,15 @@ elif current_step == "sales":
 
         sales_df = st.session_state[SALES_TEMPLATE_STATE_KEY]
         month_columns_config = {
-            month: st.column_config.NumberColumn(
-                month,
-                min_value=0.0,
-                step=1.0,
-                format="¥%d",
-                help="月別の売上金額を入力します。",
-            )
-            for month in MONTH_COLUMNS
-        }
+        month: st.column_config.NumberColumn(
+            month,
+            min_value=0.0,
+            step=1.0,
+            format="%.0f",
+            help=f"月別の売上金額を入力します（単位：{unit}）。",
+        )
+        for month in MONTH_COLUMNS
+    }
         guidance_col, preview_col = st.columns([2.6, 1.4], gap="large")
         with guidance_col:
             st.markdown("##### テンプレートの使い方")
@@ -1632,7 +1737,7 @@ elif current_step == "sales":
                             "想定顧客数", min_value=0.0, step=1.0, format="%d", help="月間で想定する顧客数。Fermi推定の起点となります。"
                         ),
                         "客単価": st.column_config.NumberColumn(
-                            "客単価", min_value=0.0, step=100.0, format="¥%d", help="平均客単価。販促シナリオの前提になります。"
+                            "客単価", min_value=0.0, step=100.0, format="%.0f", help="平均客単価。販促シナリオの前提になります。（単位：円）"
                         ),
                         "購入頻度(月)": st.column_config.NumberColumn(
                             "購入頻度(月)",
@@ -1767,12 +1872,14 @@ elif current_step == "sales":
                         apply_to_plan = st.checkbox(
                             "平均月額を固定費に反映する", value=True, key="external_apply_fixed"
                         )
-                        fixed_options = [code for code, _, _ in FIXED_COST_FIELDS]
+                        fixed_options = [code for code, _, _, _ in FIXED_COST_FIELDS]
                         selected_fixed_code = st.selectbox(
                             "反映先の固定費項目",
                             fixed_options,
                             format_func=lambda code: next(
-                                label for code_, label, _ in FIXED_COST_FIELDS if code_ == code
+                                label
+                                for code_, label, _, _ in FIXED_COST_FIELDS
+                                if code_ == code
                             ),
                             key="external_fixed_code",
                         )
@@ -1861,19 +1968,26 @@ elif current_step == "costs":
             )
     st.caption("※ 原価率は売上高に対する比率で入力します。0〜100%の範囲で設定してください。")
 
-    st.markdown("#### 固定費（販管費）")
-    fixed_cols = st.columns(len(FIXED_COST_FIELDS))
+    st.markdown("#### 固定費・販管費")
     fixed_inputs: Dict[str, float] = {}
-    for col, (code, label, help_text) in zip(fixed_cols, FIXED_COST_FIELDS):
-        with col:
-            base_value = Decimal(str(fixed_costs.get(code, 0.0)))
-            fixed_inputs[code] = _yen_number_input(
-                f"{label} ({unit})",
-                value=float(base_value / unit_factor),
-                step=1.0,
-                key=f"fixed_cost_{code}",
-                help=help_text,
-            )
+    for category in ("固定費", "販管費"):
+        grouped_fields = [
+            field for field in FIXED_COST_FIELDS if FIXED_COST_CATEGORY.get(field[0]) == category
+        ]
+        if not grouped_fields:
+            continue
+        st.markdown(f"##### {category}")
+        fixed_cols = st.columns(len(grouped_fields))
+        for col, (code, label, _, help_text) in zip(fixed_cols, grouped_fields):
+            with col:
+                base_value = Decimal(str(fixed_costs.get(code, 0.0)))
+                fixed_inputs[code] = _yen_number_input(
+                    f"{label} ({unit})",
+                    value=float(base_value / unit_factor),
+                    step=1.0,
+                    key=f"fixed_cost_{code}",
+                    help=help_text,
+                )
     st.caption("※ 表示単位に合わせた金額で入力します。採用計画やコスト削減メモは事業計画メモ欄へ。")
 
     st.markdown("#### 営業外収益 / 営業外費用")
@@ -1903,6 +2017,94 @@ elif current_step == "costs":
                 help=help_text,
             )
 
+    st.markdown("#### 売上総利益率への影響")
+    total_sales_amount = float(_calculate_sales_total(sales_df))
+    impact_records: List[Dict[str, float | str]] = []
+    order_index = 0
+    var_total_pct = 0.0
+    for code, label, _ in VARIABLE_RATIO_FIELDS:
+        ratio_pct = variable_inputs.get(code, 0.0) * 100.0
+        if ratio_pct <= 0:
+            continue
+        impact_records.append(
+            {
+                "項目": label.replace(" (％)", ""),
+                "区分": "変動費",
+                "影響度": -ratio_pct,
+                "順序": order_index,
+            }
+        )
+        order_index += 1
+        var_total_pct += ratio_pct
+    gross_margin_pct = max(-200.0, min(100.0, 100.0 - var_total_pct))
+    impact_records.append(
+        {
+            "項目": "売上総利益率",
+            "区分": "利益率",
+            "影響度": gross_margin_pct,
+            "順序": order_index,
+        }
+    )
+    order_index += 1
+
+    fixed_total_pct = 0.0
+    if total_sales_amount > 0:
+        unit_multiplier = float(unit_factor or Decimal("1"))
+        for code, label, category, _ in FIXED_COST_FIELDS:
+            amount = float(fixed_inputs.get(code, 0.0)) * unit_multiplier
+            pct = (amount / total_sales_amount) * 100.0 if total_sales_amount else 0.0
+            if pct <= 0:
+                continue
+            impact_records.append(
+                {
+                    "項目": label,
+                    "区分": category,
+                    "影響度": -pct,
+                    "順序": order_index,
+                }
+            )
+            order_index += 1
+            fixed_total_pct += pct
+        operating_margin_pct = gross_margin_pct - fixed_total_pct
+        impact_records.append(
+            {
+                "項目": "営業利益率",
+                "区分": "利益率",
+                "影響度": operating_margin_pct,
+                "順序": order_index,
+            }
+        )
+    else:
+        st.info("売上計画が未入力のため、粗利率のチャートは売上データ登録後に表示されます。")
+
+    if impact_records and total_sales_amount > 0:
+        impact_df = pd.DataFrame(impact_records)
+        sort_order = impact_df.sort_values("順序")
+        chart = (
+            alt.Chart(sort_order)
+            .mark_bar()
+            .encode(
+                x=alt.X(
+                    "影響度:Q",
+                    axis=alt.Axis(format="+.1f", title="売上に対する割合 (％)"),
+                ),
+                y=alt.Y(
+                    "項目:N",
+                    sort=alt.SortField(field="順序", order="ascending"),
+                ),
+                color=alt.Color("区分:N", legend=alt.Legend(title="区分")),
+                tooltip=[
+                    alt.Tooltip("項目:N"),
+                    alt.Tooltip("区分:N"),
+                    alt.Tooltip("影響度:Q", format="+.1f"),
+                ],
+            )
+            .properties(height=280)
+        )
+        st.altair_chart(chart, use_container_width=True)
+    elif total_sales_amount > 0:
+        st.info("コスト項目が0のため、粗利率チャートを描画できるデータがありません。")
+
     cost_range_state: Dict[str, Dict[str, float]] = st.session_state.get(COST_RANGE_STATE_KEY, {})
     with st.expander("🔀 レンジ入力 (原価・費用の幅)", expanded=False):
         st.caption("最小・中央値・最大の3点を入力すると、分析ページで感度レンジを参照できます。")
@@ -1914,9 +2116,12 @@ elif current_step == "costs":
                 {
                     "コード": code,
                     "項目": label,
-                    "最小": float(profile.get("min", variable_inputs.get(code, 0.0))),
-                    "中央値": float(profile.get("typical", variable_inputs.get(code, 0.0))),
-                    "最大": float(profile.get("max", variable_inputs.get(code, 0.0))),
+                    "最小 (％)": float(profile.get("min", variable_inputs.get(code, 0.0))) * 100.0,
+                    "中央値 (％)": float(
+                        profile.get("typical", variable_inputs.get(code, 0.0))
+                    )
+                    * 100.0,
+                    "最大 (％)": float(profile.get("max", variable_inputs.get(code, 0.0))) * 100.0,
                 }
             )
         variable_range_df = pd.DataFrame(variable_rows)
@@ -1926,9 +2131,15 @@ elif current_step == "costs":
             column_config={
                 "コード": st.column_config.TextColumn("コード", disabled=True),
                 "項目": st.column_config.TextColumn("項目", disabled=True),
-                "最小": st.column_config.NumberColumn("最小", min_value=0.0, max_value=1.0, format="%.2f"),
-                "中央値": st.column_config.NumberColumn("中央値", min_value=0.0, max_value=1.0, format="%.2f"),
-                "最大": st.column_config.NumberColumn("最大", min_value=0.0, max_value=1.0, format="%.2f"),
+                "最小 (％)": st.column_config.NumberColumn(
+                    "最小 (％)", min_value=0.0, max_value=100.0, format="%.1f", help="％で入力"
+                ),
+                "中央値 (％)": st.column_config.NumberColumn(
+                    "中央値 (％)", min_value=0.0, max_value=100.0, format="%.1f", help="％で入力"
+                ),
+                "最大 (％)": st.column_config.NumberColumn(
+                    "最大 (％)", min_value=0.0, max_value=100.0, format="%.1f", help="％で入力"
+                ),
             },
             key="cost_variable_range_editor",
             **use_container_width_kwargs(st.data_editor),
@@ -1936,7 +2147,7 @@ elif current_step == "costs":
         _update_cost_range_state_from_editor(variable_edited)
 
         fixed_rows = []
-        for code, label, _ in FIXED_COST_FIELDS:
+        for code, label, _, _ in FIXED_COST_FIELDS:
             profile = cost_range_state.get(code, {})
             fixed_rows.append(
                 {
@@ -1966,9 +2177,15 @@ elif current_step == "costs":
             column_config={
                 "コード": st.column_config.TextColumn("コード", disabled=True),
                 "項目": st.column_config.TextColumn("項目", disabled=True),
-                "最小": st.column_config.NumberColumn("最小", min_value=0.0, format="¥%d"),
-                "中央値": st.column_config.NumberColumn("中央値", min_value=0.0, format="¥%d"),
-                "最大": st.column_config.NumberColumn("最大", min_value=0.0, format="¥%d"),
+                "最小": st.column_config.NumberColumn(
+                    "最小", min_value=0.0, format="%.0f", help=f"単位：{unit}"
+                ),
+                "中央値": st.column_config.NumberColumn(
+                    "中央値", min_value=0.0, format="%.0f", help=f"単位：{unit}"
+                ),
+                "最大": st.column_config.NumberColumn(
+                    "最大", min_value=0.0, format="%.0f", help=f"単位：{unit}"
+                ),
             },
             key="cost_fixed_range_editor",
             **use_container_width_kwargs(st.data_editor),
@@ -2000,7 +2217,7 @@ elif current_step == "invest":
                 "金額 (円)",
                 min_value=0.0,
                 step=1_000_000.0,
-                format="¥%d",
+                format="%.0f",
                 help="投資にかかる総額。例：5,000,000円など。",
             ),
             "開始月": st.column_config.NumberColumn(
@@ -2036,7 +2253,7 @@ elif current_step == "invest":
                 "元本 (円)",
                 min_value=0.0,
                 step=1_000_000.0,
-                format="¥%d",
+                format="%.0f",
                 help="借入金額の総額。",
             ),
             "金利": st.column_config.NumberColumn(
@@ -2044,8 +2261,8 @@ elif current_step == "invest":
                 min_value=0.0,
                 max_value=0.2,
                 step=0.001,
-                format="%.2f%%",
-                help="年利ベースの金利を入力します。",
+                format="%.2f",
+                help="年利ベースの金利を入力します（例：5%の場合は0.05）。",
             ),
             "返済期間(月)": st.column_config.NumberColumn(
                 "返済期間 (月)",

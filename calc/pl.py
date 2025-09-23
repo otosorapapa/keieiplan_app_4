@@ -26,7 +26,9 @@ ITEMS: List[Tuple[str, str, str]] = [
     ("COGS_TTL", "外部仕入｜計", "外部仕入"),
     ("GROSS", "粗利(加工高)", "粗利"),
     ("OPEX_H", "内部費用｜人件費", "内部費用"),
-    ("OPEX_K", "内部費用｜経費", "内部費用"),
+    ("OPEX_AD", "内部費用｜広告宣伝費", "内部費用"),
+    ("OPEX_UTIL", "内部費用｜水道光熱費", "内部費用"),
+    ("OPEX_OTH", "内部費用｜その他販管費", "内部費用"),
     ("OPEX_DEP", "内部費用｜減価償却費", "内部費用"),
     ("OPEX_TTL", "内部費用｜計", "内部費用"),
     ("OP", "営業利益", "損益"),
@@ -85,7 +87,7 @@ class PlanConfig:
 
 
 COST_CODES = ["COGS_MAT", "COGS_LBR", "COGS_OUT_SRC", "COGS_OUT_CON", "COGS_OTH"]
-OPEX_CODES = ["OPEX_H", "OPEX_K", "OPEX_DEP"]
+OPEX_CODES = ["OPEX_H", "OPEX_AD", "OPEX_UTIL", "OPEX_OTH", "OPEX_DEP"]
 NOI_CODES = ["NOI_MISC", "NOI_GRANT", "NOI_OTH"]
 NOE_CODES = ["NOE_INT", "NOE_OTH"]
 

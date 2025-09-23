@@ -457,7 +457,9 @@ DEFAULT_COST_PLAN = CostPlan(
     },
     fixed_costs={
         "OPEX_H": Decimal("170000000"),
-        "OPEX_K": Decimal("468000000"),
+        "OPEX_AD": Decimal("180000000"),
+        "OPEX_UTIL": Decimal("48000000"),
+        "OPEX_OTH": Decimal("240000000"),
         "OPEX_DEP": Decimal("6000000"),
     },
     non_operating_income={
