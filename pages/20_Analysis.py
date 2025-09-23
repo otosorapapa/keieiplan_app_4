@@ -31,6 +31,13 @@ from models import (
 from theme import COLOR_BLIND_COLORS, THEME_COLORS, inject_theme
 from ui.components import MetricCard, render_metric_cards
 from ui.streamlit_compat import use_container_width_kwargs
+from services.marketing_strategy import (
+    FOUR_P_KEYS,
+    FOUR_P_LABELS,
+    SESSION_STATE_KEY as MARKETING_STRATEGY_KEY,
+    generate_marketing_recommendations,
+    marketing_state_has_content,
+)
 
 ITEM_LABELS = {code: label for code, label, _ in ITEMS}
 
@@ -42,6 +49,7 @@ PLOTLY_DOWNLOAD_OPTIONS = {
 }
 
 FINANCIAL_SERIES_STATE_KEY = "financial_timeseries"
+BUSINESS_CONTEXT_KEY = "business_context"
 FINANCIAL_SERIES_COLUMNS = [
     "年度",
     "区分",
@@ -2224,6 +2232,60 @@ with trend_tab:
 
 
 with strategy_tab:
+    st.subheader("マーケティング戦略サマリー")
+    marketing_state = st.session_state.get(MARKETING_STRATEGY_KEY, {})
+    if not marketing_state_has_content(marketing_state):
+        st.info("Inputsページ『ビジネスモデル整理』ステップで4P/3C情報を入力すると、ここに提案が表示されます。")
+    else:
+        business_context = st.session_state.get(BUSINESS_CONTEXT_KEY, {})
+        marketing_summary = generate_marketing_recommendations(marketing_state, business_context)
+        st.caption("4P・3C入力をもとに自動生成された強化策とポジショニングの提案です。")
+
+        competitor_highlights = marketing_summary.get("competitor_highlights", [])
+        if competitor_highlights:
+            st.markdown("**競合比較ハイライト**")
+            st.markdown("\n".join(f"- {item}" for item in competitor_highlights))
+
+        four_p_recs = marketing_summary.get("four_p", {})
+        suggestion_cols = st.columns(2)
+        column_map = {"product": 0, "price": 0, "place": 1, "promotion": 1}
+        for key in FOUR_P_KEYS:
+            label = FOUR_P_LABELS[key]
+            column_index = column_map.get(key, 0)
+            with suggestion_cols[column_index]:
+                st.markdown(f"**{label}**")
+                lines = four_p_recs.get(key, [])
+                if lines:
+                    st.markdown("\n".join(f"- {line}" for line in lines))
+                else:
+                    st.markdown("- 提案を生成するにはInputsページで詳細を入力してください。")
+
+        st.markdown("**顧客価値提案 (UVP)**")
+        st.write(marketing_summary.get("uvp", ""))
+
+        st.markdown("**STP提案**")
+        st.markdown(
+            "\n".join(
+                [
+                    f"- セグメンテーション: {marketing_summary.get('segmentation', '')}",
+                    f"- ターゲティング: {marketing_summary.get('targeting', '')}",
+                    f"- ポジショニング: {marketing_summary.get('positioning', '')}",
+                ]
+            )
+        )
+        positioning_points = marketing_summary.get("positioning_points", [])
+        if positioning_points:
+            st.markdown("\n".join(f"- {point}" for point in positioning_points))
+
+        competitor_table = marketing_summary.get("competitor_table", [])
+        if competitor_table:
+            competitor_df = pd.DataFrame(competitor_table)
+            st.dataframe(
+                competitor_df,
+                hide_index=True,
+                **use_container_width_kwargs(st.dataframe),
+            )
+
     st.subheader("SWOT・PEST分析")
     swot_records = _strategic_records_from_state("swot")
     pest_records = _strategic_records_from_state("pest")
