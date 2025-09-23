@@ -138,7 +138,7 @@ DEFAULT_MC_CONFIG: Dict[str, Dict[str, float | str]] = {
     "fixed": {"mean_pct": 0.0, "std_pct": 1.0, "distribution": "normal"},
 }
 
-FIXED_COST_CODES = ["OPEX_H", "OPEX_K", "OPEX_DEP"]
+FIXED_COST_CODES = ["OPEX_H", "OPEX_AD", "OPEX_UTIL", "OPEX_OTH", "OPEX_DEP"]
 
 COGS_CODES = ["COGS_MAT", "COGS_LBR", "COGS_OUT_SRC", "COGS_OUT_CON", "COGS_OTH"]
 

@@ -97,7 +97,9 @@ _register(
         },
         fixed_costs={
             "OPEX_H": 9500000.0,
-            "OPEX_K": 7200000.0,
+            "OPEX_AD": 2400000.0,
+            "OPEX_UTIL": 1800000.0,
+            "OPEX_OTH": 3000000.0,
             "OPEX_DEP": 4200000.0,
         },
         non_operating_expenses={
@@ -149,7 +151,9 @@ _register(
         },
         fixed_costs={
             "OPEX_H": 12500000.0,
-            "OPEX_K": 5400000.0,
+            "OPEX_AD": 2000000.0,
+            "OPEX_UTIL": 1200000.0,
+            "OPEX_OTH": 2200000.0,
             "OPEX_DEP": 1800000.0,
         },
         non_operating_income={
@@ -201,7 +205,9 @@ _register(
         },
         fixed_costs={
             "OPEX_H": 7800000.0,
-            "OPEX_K": 5200000.0,
+            "OPEX_AD": 1800000.0,
+            "OPEX_UTIL": 1600000.0,
+            "OPEX_OTH": 1800000.0,
             "OPEX_DEP": 900000.0,
         },
         non_operating_expenses={
@@ -254,7 +260,9 @@ _register(
         },
         fixed_costs={
             "OPEX_H": 6900000.0,
-            "OPEX_K": 8600000.0,
+            "OPEX_AD": 3200000.0,
+            "OPEX_UTIL": 1800000.0,
+            "OPEX_OTH": 3600000.0,
             "OPEX_DEP": 1500000.0,
         },
         non_operating_income={
