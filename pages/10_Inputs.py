@@ -812,8 +812,21 @@ FIXED_COST_CODES = {code for code, _, _, _ in FIXED_COST_FIELDS}
 NOI_CODES = {code for code, _, _ in NOI_FIELDS}
 NOE_CODES = {code for code, _, _ in NOE_FIELDS}
 
+CONSUMPTION_TAX_DEDUCTIBLE_CODES = {
+    "COGS_MAT",
+    "COGS_LBR",
+    "COGS_OUT_SRC",
+    "COGS_OUT_CON",
+    "COGS_OTH",
+    "OPEX_AD",
+    "OPEX_UTIL",
+    "OPEX_OTH",
+    "NOE_OTH",
+}
+
 TAX_FIELD_META = {
-    "corporate": "法人税率＝課税所得にかかる税率。中小企業は約30%が目安です。",
+    "corporate": "所得税・法人税率＝課税所得にかかる国税。おおむね30%前後が目安です。",
+    "business": "事業税率＝経常利益に課される地方税。業種や規模により3〜5%程度が一般的です。",
     "consumption": "消費税率＝売上に上乗せする税率。免税事業者の場合は0%に設定します。",
     "dividend": "配当性向＝税引後利益に対する配当割合。成長投資を優先する場合は低めに設定。",
 }
@@ -1315,6 +1328,92 @@ def _serialize_loan_editor_df(df: pd.DataFrame) -> Dict[str, object]:
     return {"loans": loans}
 
 
+def _build_bundle_payload_from_inputs(
+    sales_df: pd.DataFrame,
+    variable_inputs: Dict[str, float],
+    fixed_inputs: Dict[str, float],
+    noi_inputs: Dict[str, float],
+    noe_inputs: Dict[str, float],
+    *,
+    unit_factor: Decimal,
+    cost_range_state: Dict[str, Dict[str, float]],
+    capex_df: pd.DataFrame,
+    loan_df: pd.DataFrame,
+    tax_payload: Dict[str, Decimal],
+) -> Dict[str, object]:
+    sales_data = {"items": []}
+    for _, row in sales_df.fillna(0).iterrows():
+        monthly_amounts = [Decimal(str(row.get(month, 0))) for month in MONTH_COLUMNS]
+        customers_val = Decimal(str(row.get("想定顧客数", 0)))
+        unit_price_val = Decimal(str(row.get("客単価", 0)))
+        frequency_val = Decimal(str(row.get("購入頻度(月)", 0)))
+        memo_val = str(row.get("メモ", "")).strip()
+        annual_min_val = Decimal(str(row.get("年間売上(最低)", 0)))
+        annual_typical_val = Decimal(str(row.get("年間売上(中央値)", 0)))
+        annual_max_val = Decimal(str(row.get("年間売上(最高)", 0)))
+        sales_data["items"].append(
+            {
+                "channel": str(row.get("チャネル", "")).strip() or "未設定",
+                "product": str(row.get("商品", "")).strip() or "未設定",
+                "monthly": {"amounts": monthly_amounts},
+                "customers": customers_val if customers_val > 0 else None,
+                "unit_price": unit_price_val if unit_price_val > 0 else None,
+                "purchase_frequency": frequency_val if frequency_val > 0 else None,
+                "memo": memo_val or None,
+                "revenue_range": {
+                    "minimum": annual_min_val,
+                    "typical": annual_typical_val if annual_typical_val > 0 else sum(monthly_amounts),
+                    "maximum": max(annual_max_val, annual_typical_val, sum(monthly_amounts)),
+                },
+            }
+        )
+
+    range_profiles: Dict[str, Dict[str, Decimal]] = {}
+    for code, profile in (cost_range_state or {}).items():
+        min_val = Decimal(str(profile.get("min", 0.0)))
+        typ_val = Decimal(str(profile.get("typical", 0.0)))
+        max_val = Decimal(str(profile.get("max", 0.0)))
+        if code in VARIABLE_RATIO_CODES:
+            divisor = Decimal("1")
+        else:
+            divisor = unit_factor or Decimal("1")
+            min_val *= divisor
+            typ_val *= divisor
+            max_val *= divisor
+        ordered = sorted([min_val, typ_val, max_val])
+        if any(value > Decimal("0") for value in ordered):
+            range_profiles[code] = {
+                "minimum": ordered[0],
+                "typical": ordered[1],
+                "maximum": ordered[2],
+            }
+
+    multiplier = unit_factor or Decimal("1")
+    costs_data = {
+        "variable_ratios": {code: Decimal(str(value)) for code, value in variable_inputs.items()},
+        "fixed_costs": {code: Decimal(str(value)) * multiplier for code, value in fixed_inputs.items()},
+        "non_operating_income": {
+            code: Decimal(str(value)) * multiplier for code, value in noi_inputs.items()
+        },
+        "non_operating_expenses": {
+            code: Decimal(str(value)) * multiplier for code, value in noe_inputs.items()
+        },
+    }
+    if range_profiles:
+        costs_data["range_profiles"] = range_profiles
+
+    capex_data = _serialize_capex_editor_df(capex_df)
+    loan_data = _serialize_loan_editor_df(loan_df)
+
+    return {
+        "sales": sales_data,
+        "costs": costs_data,
+        "capex": capex_data,
+        "loans": loan_data,
+        "tax": tax_payload,
+    }
+
+
 sales_defaults_df = _sales_dataframe(finance_raw.get("sales", {}))
 _ensure_sales_template_state(sales_defaults_df)
 stored_sales_df = st.session_state.get(SALES_TEMPLATE_STATE_KEY, sales_defaults_df)
@@ -1479,6 +1578,7 @@ for code, _, _ in NOE_FIELDS:
     st.session_state.setdefault(f"noe_{code}", default_value)
 
 st.session_state.setdefault("tax_corporate_rate", float(tax_defaults.get("corporate_tax_rate", 0.3)))
+st.session_state.setdefault("tax_business_rate", float(tax_defaults.get("business_tax_rate", 0.05)))
 st.session_state.setdefault("tax_consumption_rate", float(tax_defaults.get("consumption_tax_rate", 0.1)))
 st.session_state.setdefault("tax_dividend_ratio", float(tax_defaults.get("dividend_payout_ratio", 0.0)))
 
@@ -2477,12 +2577,14 @@ elif current_step == "tax":
     _maybe_show_tutorial("tax", "保存ボタンで計画を確定し、各ページへ反映させましょう。")
     st.header("STEP 5｜税制・保存")
     st.markdown("税率を確認し、これまでの入力内容を保存します。")
-    st.info("法人税率・消費税率・配当性向は業種や制度により異なります。最新情報を確認しながら設定してください。")
+    st.info(
+        "所得税・法人税率や事業税率、消費税率は業種や制度により異なります。最新情報を確認しながら設定してください。"
+    )
 
-    tax_cols = st.columns(3)
+    tax_cols = st.columns(4)
     with tax_cols[0]:
         corporate_rate = _percent_number_input(
-            "法人税率 (0-55%)",
+            "所得税・法人税率 (0-55%)",
             min_value=0.0,
             max_value=0.55,
             step=0.01,
@@ -2491,6 +2593,16 @@ elif current_step == "tax":
             help=TAX_FIELD_META["corporate"],
         )
     with tax_cols[1]:
+        business_rate = _percent_number_input(
+            "事業税率 (0-15%)",
+            min_value=0.0,
+            max_value=0.15,
+            step=0.005,
+            value=float(st.session_state.get("tax_business_rate", 0.05)),
+            key="tax_business_rate",
+            help=TAX_FIELD_META["business"],
+        )
+    with tax_cols[2]:
         consumption_rate = _percent_number_input(
             "消費税率 (0-20%)",
             min_value=0.0,
@@ -2500,7 +2612,7 @@ elif current_step == "tax":
             key="tax_consumption_rate",
             help=TAX_FIELD_META["consumption"],
         )
-    with tax_cols[2]:
+    with tax_cols[3]:
         dividend_ratio = _percent_number_input(
             "配当性向",
             min_value=0.0,
@@ -2548,6 +2660,190 @@ elif current_step == "tax":
         noe_defaults, NOE_FIELDS, "noe", unit_factor
     )
 
+    tax_payload = {
+        "corporate_tax_rate": Decimal(str(corporate_rate)),
+        "business_tax_rate": Decimal(str(business_rate)),
+        "consumption_tax_rate": Decimal(str(consumption_rate)),
+        "dividend_payout_ratio": Decimal(str(dividend_ratio)),
+    }
+    capex_df_current = pd.DataFrame(st.session_state.get("capex_editor_df", capex_defaults_df))
+    loan_df_current = pd.DataFrame(st.session_state.get("loan_editor_df", loan_defaults_df))
+    cost_range_state = st.session_state.get(COST_RANGE_STATE_KEY, {})
+
+    bundle_payload = _build_bundle_payload_from_inputs(
+        sales_df,
+        costs_variable_inputs,
+        costs_fixed_inputs,
+        costs_noi_inputs,
+        costs_noe_inputs,
+        unit_factor=unit_factor,
+        cost_range_state=cost_range_state,
+        capex_df=capex_df_current,
+        loan_df=loan_df_current,
+        tax_payload=tax_payload,
+    )
+    preview_bundle, preview_issues = validate_bundle(bundle_payload)
+
+    preview_amounts: Dict[str, Decimal] = {}
+    preview_cf_data: Dict[str, object] | None = None
+    if preview_bundle:
+        fte_value = Decimal(str(settings_state.get("fte", 20)))
+        plan_preview = plan_from_models(
+            preview_bundle.sales,
+            preview_bundle.costs,
+            preview_bundle.capex,
+            preview_bundle.loans,
+            preview_bundle.tax,
+            fte=fte_value,
+            unit=unit,
+        )
+        preview_amounts = compute(plan_preview)
+        preview_cf_data = generate_cash_flow(
+            preview_amounts,
+            preview_bundle.capex,
+            preview_bundle.loans,
+            preview_bundle.tax,
+        )
+
+    if preview_bundle and preview_amounts:
+        st.markdown("#### 年間税額の試算")
+        ordinary_income = Decimal(str(preview_amounts.get("ORD", Decimal("0"))))
+        sales_total_decimal = Decimal(str(preview_amounts.get("REV", Decimal("0"))))
+        taxable_expense_total = sum(
+            Decimal(str(preview_amounts.get(code, Decimal("0"))))
+            for code in CONSUMPTION_TAX_DEDUCTIBLE_CODES
+        )
+        income_breakdown = preview_bundle.tax.income_tax_components(ordinary_income)
+        consumption_breakdown = preview_bundle.tax.consumption_tax_balance(
+            sales_total_decimal,
+            taxable_expense_total,
+        )
+        consumption_base = sales_total_decimal - taxable_expense_total
+        total_tax = income_breakdown["total"] + consumption_breakdown["net"]
+        tax_df = pd.DataFrame(
+            [
+                {
+                    "税目": "所得税・法人税",
+                    "課税ベース": format_amount_with_unit(ordinary_income, unit),
+                    "税率": format_ratio(preview_bundle.tax.corporate_tax_rate),
+                    "想定納税額": format_amount_with_unit(income_breakdown["corporate"], unit),
+                },
+                {
+                    "税目": "事業税",
+                    "課税ベース": format_amount_with_unit(ordinary_income, unit),
+                    "税率": format_ratio(preview_bundle.tax.business_tax_rate),
+                    "想定納税額": format_amount_with_unit(income_breakdown["business"], unit),
+                },
+                {
+                    "税目": "消費税 (純額)",
+                    "課税ベース": format_amount_with_unit(consumption_base, unit),
+                    "税率": format_ratio(preview_bundle.tax.consumption_tax_rate),
+                    "想定納税額": format_amount_with_unit(consumption_breakdown["net"], unit),
+                },
+                {
+                    "税目": "年間合計",
+                    "課税ベース": "—",
+                    "税率": "—",
+                    "想定納税額": format_amount_with_unit(total_tax, unit),
+                },
+            ]
+        )
+        st.dataframe(
+            tax_df,
+            hide_index=True,
+            **use_container_width_kwargs(st.dataframe),
+            column_config={
+                "税目": st.column_config.TextColumn("税目"),
+                "課税ベース": st.column_config.TextColumn("課税ベース"),
+                "税率": st.column_config.TextColumn("税率"),
+                "想定納税額": st.column_config.TextColumn("想定納税額"),
+            },
+        )
+        if consumption_breakdown["net"] < Decimal("0"):
+            st.caption("※ 消費税は仕入控除が上回るため還付見込み（マイナス表示）です。")
+        st.caption(f"金額は{unit}単位で表示しています。")
+
+        metrics_preview = preview_cf_data.get("investment_metrics", {}) if preview_cf_data else {}
+        monthly_projection = metrics_preview.get("monthly_cash_flows", [])
+        if monthly_projection:
+            st.markdown("#### 月次資金繰りシミュレーション")
+            monthly_df = pd.DataFrame(monthly_projection)
+            if not monthly_df.empty:
+                scaling = unit_factor or Decimal("1")
+
+                def _to_decimal_safe(value: object) -> Decimal:
+                    try:
+                        return Decimal(str(value))
+                    except Exception:
+                        return Decimal("0")
+
+                display_df = pd.DataFrame(
+                    {
+                        "年": monthly_df["year"].apply(lambda x: int(_to_decimal_safe(x))),
+                        "月": monthly_df["month"].apply(lambda x: int(_to_decimal_safe(x))),
+                        "営業CF": monthly_df["operating"].apply(
+                            lambda x: float(_to_decimal_safe(x) / scaling)
+                        ),
+                        "投資CF": monthly_df["investing"].apply(
+                            lambda x: float(_to_decimal_safe(x) / scaling)
+                        ),
+                        "財務CF": monthly_df["financing"].apply(
+                            lambda x: float(_to_decimal_safe(x) / scaling)
+                        ),
+                        "利息支払": monthly_df["interest"].apply(
+                            lambda x: float(_to_decimal_safe(x) / scaling)
+                        ),
+                        "元本返済": monthly_df["principal"].apply(
+                            lambda x: float(_to_decimal_safe(x) / scaling)
+                        ),
+                        "純増減": monthly_df["net"].apply(
+                            lambda x: float(_to_decimal_safe(x) / scaling)
+                        ),
+                        "累積残高": monthly_df["cumulative"].apply(
+                            lambda x: float(_to_decimal_safe(x) / scaling)
+                        ),
+                    }
+                )
+                preview_horizon = min(24, len(display_df))
+                display_subset = display_df.iloc[:preview_horizon]
+                st.dataframe(
+                    display_subset,
+                    hide_index=True,
+                    **use_container_width_kwargs(st.dataframe),
+                    column_config={
+                        "年": st.column_config.NumberColumn("年", format="%d"),
+                        "月": st.column_config.NumberColumn("月", format="%d"),
+                        "営業CF": st.column_config.NumberColumn("営業CF", format="%.1f"),
+                        "投資CF": st.column_config.NumberColumn("投資CF", format="%.1f"),
+                        "財務CF": st.column_config.NumberColumn("財務CF", format="%.1f"),
+                        "利息支払": st.column_config.NumberColumn("利息支払", format="%.1f"),
+                        "元本返済": st.column_config.NumberColumn("元本返済", format="%.1f"),
+                        "純増減": st.column_config.NumberColumn("純増減", format="%.1f"),
+                        "累積残高": st.column_config.NumberColumn("累積残高", format="%.1f"),
+                    },
+                )
+                if len(display_df) > preview_horizon:
+                    st.caption("※ 25ヶ月目以降はAnalysisタブの詳細資金繰りで確認できます。")
+
+                cumulative_decimals = monthly_df["cumulative"].apply(_to_decimal_safe)
+                min_cumulative = cumulative_decimals.min()
+                min_index = int(cumulative_decimals.idxmin())
+                short_year = int(_to_decimal_safe(monthly_df.loc[min_index, "year"]))
+                short_month = int(_to_decimal_safe(monthly_df.loc[min_index, "month"]))
+                if min_cumulative < Decimal("0"):
+                    st.error(
+                        f"FY{short_year} 月{short_month:02d}に{format_amount_with_unit(min_cumulative, unit)}まで現金が減少し資金ショートが想定されます。追加調達やコスト見直しを検討してください。"
+                    )
+                elif min_cumulative == Decimal("0"):
+                    st.warning(
+                        f"FY{short_year} 月{short_month:02d}に累積残高がゼロとなります。安全余裕資金の確保を検討してください。"
+                    )
+                else:
+                    st.success("シミュレーション上、累積キャッシュは全期間でプラスを維持しています。")
+                st.caption(f"金額は{unit}単位で表示しています。")
+    elif preview_issues:
+        st.info("入力内容にエラーがあるため、税額と資金繰りの試算を表示できません。保存前に各ステップで赤枠の項目を修正してください。")
+
     save_col, _ = st.columns([2, 1])
     with save_col:
         if st.button(
@@ -2555,108 +2851,21 @@ elif current_step == "tax":
             type="primary",
             **use_container_width_kwargs(st.button),
         ):
-            sales_df = _standardize_sales_df(pd.DataFrame(st.session_state[SALES_TEMPLATE_STATE_KEY]))
-            st.session_state[SALES_TEMPLATE_STATE_KEY] = sales_df
-
-            sales_data = {"items": []}
-            for _, row in sales_df.fillna(0).iterrows():
-                monthly_amounts = [Decimal(str(row[month])) for month in MONTH_COLUMNS]
-                customers_val = Decimal(str(row.get("想定顧客数", 0)))
-                unit_price_val = Decimal(str(row.get("客単価", 0)))
-                frequency_val = Decimal(str(row.get("購入頻度(月)", 0)))
-                memo_val = str(row.get("メモ", "")).strip()
-                annual_min_val = Decimal(str(row.get("年間売上(最低)", 0)))
-                annual_typical_val = Decimal(str(row.get("年間売上(中央値)", 0)))
-                annual_max_val = Decimal(str(row.get("年間売上(最高)", 0)))
-                sales_data["items"].append(
-                    {
-                        "channel": str(row.get("チャネル", "")).strip() or "未設定",
-                        "product": str(row.get("商品", "")).strip() or "未設定",
-                        "monthly": {"amounts": monthly_amounts},
-                        "customers": customers_val if customers_val > 0 else None,
-                        "unit_price": unit_price_val if unit_price_val > 0 else None,
-                        "purchase_frequency": frequency_val if frequency_val > 0 else None,
-                        "memo": memo_val or None,
-                        "revenue_range": {
-                            "minimum": annual_min_val,
-                            "typical": annual_typical_val if annual_typical_val > 0 else sum(monthly_amounts),
-                            "maximum": max(annual_max_val, annual_typical_val),
-                        },
-                    }
-                )
-
-            cost_range_state = st.session_state.get(COST_RANGE_STATE_KEY, {})
-            range_profiles: Dict[str, Dict[str, Decimal]] = {}
-            for code, profile in cost_range_state.items():
-                min_val = Decimal(str(profile.get("min", 0.0)))
-                typ_val = Decimal(str(profile.get("typical", 0.0)))
-                max_val = Decimal(str(profile.get("max", 0.0)))
-                if code in VARIABLE_RATIO_CODES:
-                    divisor = Decimal("1")
-                else:
-                    divisor = unit_factor
-                    min_val *= divisor
-                    typ_val *= divisor
-                    max_val *= divisor
-                ordered = sorted([min_val, typ_val, max_val])
-                if any(value > Decimal("0") for value in ordered):
-                    range_profiles[code] = {
-                        "minimum": ordered[0],
-                        "typical": ordered[1],
-                        "maximum": ordered[2],
-                    }
-
-            costs_data = {
-                "variable_ratios": {
-                    code: Decimal(str(value)) for code, value in costs_variable_inputs.items()
-                },
-                "fixed_costs": {
-                    code: Decimal(str(value)) * unit_factor for code, value in costs_fixed_inputs.items()
-                },
-                "non_operating_income": {
-                    code: Decimal(str(value)) * unit_factor for code, value in costs_noi_inputs.items()
-                },
-                "non_operating_expenses": {
-                    code: Decimal(str(value)) * unit_factor for code, value in costs_noe_inputs.items()
-                },
-            }
-            if range_profiles:
-                costs_data["range_profiles"] = range_profiles
-
-            capex_df = pd.DataFrame(st.session_state.get("capex_editor_df", capex_defaults_df))
-            capex_data = _serialize_capex_editor_df(capex_df)
-
-            loan_df = pd.DataFrame(st.session_state.get("loan_editor_df", loan_defaults_df))
-            loan_data = _serialize_loan_editor_df(loan_df)
-
-            tax_data = {
-                "corporate_tax_rate": Decimal(str(corporate_rate)),
-                "consumption_tax_rate": Decimal(str(consumption_rate)),
-                "dividend_payout_ratio": Decimal(str(dividend_ratio)),
-            }
-
-            bundle_dict = {
-                "sales": sales_data,
-                "costs": costs_data,
-                "capex": capex_data,
-                "loans": loan_data,
-                "tax": tax_data,
-            }
-
-            bundle, issues = validate_bundle(bundle_dict)
-            if issues:
-                st.session_state["finance_validation_errors"] = issues
+            if preview_issues:
+                st.session_state["finance_validation_errors"] = preview_issues
                 st.toast("入力にエラーがあります。赤枠の項目を修正してください。", icon="❌")
             else:
                 st.session_state["finance_validation_errors"] = []
-                st.session_state["finance_raw"] = bundle_dict
-                st.session_state["finance_models"] = {
-                    "sales": bundle.sales,
-                    "costs": bundle.costs,
-                    "capex": bundle.capex,
-                    "loans": bundle.loans,
-                    "tax": bundle.tax,
-                }
+                st.session_state[SALES_TEMPLATE_STATE_KEY] = sales_df
+                st.session_state["finance_raw"] = bundle_payload
+                if preview_bundle:
+                    st.session_state["finance_models"] = {
+                        "sales": preview_bundle.sales,
+                        "costs": preview_bundle.costs,
+                        "capex": preview_bundle.capex,
+                        "loans": preview_bundle.loans,
+                        "tax": preview_bundle.tax,
+                    }
                 st.toast("財務データを保存しました。", icon="✅")
 
     st.divider()

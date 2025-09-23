@@ -28,7 +28,7 @@ class CashFlowGenerationTests(unittest.TestCase):
                 )
             ]
         )
-        tax_policy = TaxPolicy(corporate_tax_rate=Decimal("0.30"))
+        tax_policy = TaxPolicy(corporate_tax_rate=Decimal("0.30"), business_tax_rate=Decimal("0.0"))
 
         pl_amounts = {"ORD": Decimal("50000"), "OPEX_DEP": Decimal("20000")}
 
@@ -56,6 +56,10 @@ class CashFlowGenerationTests(unittest.TestCase):
         self.assertIsNotNone(metrics.get("payback_period_years"))
         monthly_cash_flows = metrics.get("monthly_cash_flows", [])
         self.assertEqual(len(monthly_cash_flows), 120)
+
+        tax_breakdown = result.get("税金内訳", {})
+        self.assertEqual(Decimal("15000"), tax_breakdown.get("corporate", Decimal("0")))
+        self.assertEqual(Decimal("0"), tax_breakdown.get("business", Decimal("0")))
 
 
 if __name__ == "__main__":  # pragma: no cover

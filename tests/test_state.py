@@ -49,6 +49,7 @@ class LoadFinanceBundleTests(unittest.TestCase):
             },
             "tax": {
                 "corporate_tax_rate": "0.30",
+                "business_tax_rate": "0.05",
                 "consumption_tax_rate": "0.10",
                 "dividend_payout_ratio": "0.0",
             },
