@@ -98,6 +98,11 @@ STATE_SPECS: Dict[str, StateSpec] = {
         dict,
         "多年度の財務指標データ",
     ),
+    "strategic_analysis": StateSpec(
+        lambda: {"swot": [], "pest": []},
+        dict,
+        "SWOT・PEST分析の入力データ",
+    ),
     "tutorial_mode": StateSpec(lambda: True, bool, "チュートリアルモードの有効/無効"),
     "tutorial_shown_steps": StateSpec(lambda: set(), set, "チュートリアル表示済みステップ"),
     "cost_range_profiles": StateSpec(dict, dict, "コスト推定レンジの保存領域"),
