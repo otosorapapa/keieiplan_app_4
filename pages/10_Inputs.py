@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import io
+import json
+from copy import deepcopy
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Mapping, Tuple
 
 import altair as alt
 import pandas as pd
@@ -31,6 +33,14 @@ from state import ensure_session_defaults
 from services import auth
 from services.auth import AuthError
 from services.fermi_learning import range_profile_from_estimate, update_learning_state
+from services.marketing_strategy import (
+    FOUR_P_KEYS,
+    FOUR_P_LABELS,
+    SESSION_STATE_KEY as MARKETING_STRATEGY_KEY,
+    empty_marketing_state,
+    generate_marketing_recommendations,
+    marketing_state_has_content,
+)
 from theme import inject_theme
 from ui.components import render_callout
 from validators import ValidationIssue, validate_bundle
@@ -185,6 +195,7 @@ BUSINESS_CONTEXT_PLACEHOLDER = {
 }
 
 STRATEGIC_ANALYSIS_KEY = "strategic_analysis"
+MARKETING_STRATEGY_SNAPSHOT_KEY = "marketing_strategy_snapshot"
 SWOT_CATEGORY_OPTIONS = ("強み", "弱み", "機会", "脅威")
 PEST_DIMENSION_OPTIONS = ("政治", "経済", "社会", "技術")
 PEST_DIRECTION_OPTIONS = ("機会", "脅威")
@@ -209,6 +220,46 @@ DEFAULT_PEST_EDITOR_ROWS = [
     {"区分": "社会", "要因": "", "影響方向": "機会", "影響度(1-5)": 3.0, "確度(1-5)": 3.0, "備考": ""},
     {"区分": "技術", "要因": "", "影響方向": "機会", "影響度(1-5)": 3.0, "確度(1-5)": 3.0, "備考": ""},
 ]
+
+FOUR_P_INPUT_GUIDE = {
+    "product": {
+        "current": "例：SaaS型在庫管理と分析ダッシュボードを提供し、導入支援を標準化。",
+        "challenge": "例：業種別要件への対応が遅く、アップセルが伸びない。",
+        "metric": "例：年間解約率5%以下、NPS+30を目標。",
+    },
+    "price": {
+        "current": "例：月額12,000円/アカウント。初期費用は5万円。",
+        "challenge": "例：価格が高いとの指摘が多く、値引き依存が続く。",
+        "metric": "例：LTV/CAC 3.0倍、平均受注単価11,000円維持。",
+    },
+    "place": {
+        "current": "例：直販営業とECサイトで全国提供。代理店は2社。",
+        "challenge": "例：地方での導入サポート網が不足。",
+        "metric": "例：チャネル別CVR5%、平均リードタイム30日。",
+    },
+    "promotion": {
+        "current": "例：ウェビナーとデジタル広告、展示会出展を実施。",
+        "challenge": "例：リード獲得単価が高止まりしている。",
+        "metric": "例：月間リード数120件、SQL化率25%。",
+    },
+}
+
+MARKETING_CUSTOMER_PLACEHOLDER = {
+    "needs": "市場ニーズや顧客課題（例：属人的な在庫管理から脱却したい）",
+    "segments": "顧客セグメント（例：年商5〜10億円の製造業、飲食チェーンなど）",
+    "persona": "ターゲット顧客のペルソナ（例：工場長、店舗オーナー、経理責任者）",
+}
+
+MARKETING_COMPANY_PLACEHOLDER = {
+    "strengths": "自社の強み・差別化資源（例：専門コンサルチーム、独自AIエンジン）",
+    "weaknesses": "弱み・制約（例：営業人員が不足、知名度が低い）",
+    "resources": "活用できるリソースやパートナー（例：地域金融機関との協業）",
+}
+
+MARKETING_COMPETITOR_HELP = (
+    "業界トップ企業と地元企業を比較し、平均価格やサービス差別化ポイントを数値で入力し"
+    "てください。サービス差別化スコアは1（低い）〜5（高い）で評価します。"
+)
 
 CUSTOMER_EXAMPLE_TEXT = (
     "例：主要顧客やターゲット市場の概要｜年商5〜10億円規模の製造業の経営企画部門。"
@@ -507,6 +558,7 @@ def _build_snapshot_payload() -> Dict[str, object]:
         "business_context": st.session_state.get(BUSINESS_CONTEXT_KEY, {}),
         "financial_timeseries": st.session_state.get(FINANCIAL_SERIES_STATE_KEY, {}),
         "strategic_analysis": st.session_state.get(STRATEGIC_ANALYSIS_KEY, {}),
+        "marketing_strategy": st.session_state.get(MARKETING_STRATEGY_KEY, {}),
         "generated_at": datetime.utcnow().isoformat(),
     }
     scenario_df_state = st.session_state.get("scenario_df")
@@ -563,6 +615,10 @@ def _hydrate_snapshot(snapshot: Dict[str, object]) -> bool:
         }
         st.session_state["swot_editor_df"] = _swot_editor_dataframe_from_state(swot_records)
         st.session_state["pest_editor_df"] = _pest_editor_dataframe_from_state(pest_records)
+    if "marketing_strategy" in snapshot and isinstance(snapshot["marketing_strategy"], dict):
+        marketing_snapshot = deepcopy(snapshot["marketing_strategy"])
+        _ensure_nested_dict(marketing_snapshot, empty_marketing_state())
+        st.session_state[MARKETING_STRATEGY_KEY] = marketing_snapshot
     return True
 
 
@@ -659,6 +715,19 @@ def _update_fermi_learning(plan_total: Decimal, actual_total: Decimal) -> None:
     st.session_state["fermi_learning"] = updated
 
 
+def _ensure_nested_dict(target: Dict[str, object], template: Mapping[str, object]) -> None:
+    for key, default_value in template.items():
+        if isinstance(default_value, Mapping):
+            current = target.get(key)
+            if not isinstance(current, dict):
+                target[key] = deepcopy(default_value)
+            else:
+                _ensure_nested_dict(current, default_value)
+        else:
+            if key not in target:
+                target[key] = default_value
+
+
 def _maybe_show_tutorial(step_id: str, message: str) -> None:
     if not st.session_state.get("tutorial_mode", True):
         return
@@ -693,7 +762,10 @@ def _calculate_completion_flags(
     capex_df: pd.DataFrame,
     loan_df: pd.DataFrame,
 ) -> Dict[str, bool]:
-    context_complete = any(str(value).strip() for value in context_state.values())
+    marketing_state = st.session_state.get(MARKETING_STRATEGY_KEY, {})
+    context_complete = any(str(value).strip() for value in context_state.values()) or marketing_state_has_content(
+        marketing_state
+    )
     sales_complete = _calculate_sales_total(sales_df) > Decimal("0")
     variable_complete = any(Decimal(str(value)) > Decimal("0") for value in variable_defaults.values())
     fixed_complete = any(Decimal(str(value)) > Decimal("0") for value in fixed_defaults.values())
@@ -1894,6 +1966,18 @@ if BUSINESS_CONTEXT_KEY not in st.session_state:
 context_state: Dict[str, str] = st.session_state[BUSINESS_CONTEXT_KEY]
 
 if (
+    MARKETING_STRATEGY_KEY not in st.session_state
+    or not isinstance(st.session_state[MARKETING_STRATEGY_KEY], dict)
+):
+    st.session_state[MARKETING_STRATEGY_KEY] = empty_marketing_state()
+else:
+    _ensure_nested_dict(
+        st.session_state[MARKETING_STRATEGY_KEY],
+        empty_marketing_state(),
+    )
+marketing_state: Dict[str, object] = st.session_state[MARKETING_STRATEGY_KEY]
+
+if (
     STRATEGIC_ANALYSIS_KEY not in st.session_state
     or not isinstance(st.session_state[STRATEGIC_ANALYSIS_KEY], dict)
 ):
@@ -1919,6 +2003,12 @@ if BUSINESS_CONTEXT_SNAPSHOT_KEY not in st.session_state:
 if BUSINESS_CONTEXT_LAST_SAVED_KEY not in st.session_state:
     st.session_state[BUSINESS_CONTEXT_LAST_SAVED_KEY] = (
         datetime.now().replace(microsecond=0).isoformat()
+    )
+if MARKETING_STRATEGY_SNAPSHOT_KEY not in st.session_state:
+    st.session_state[MARKETING_STRATEGY_SNAPSHOT_KEY] = json.dumps(
+        marketing_state,
+        ensure_ascii=False,
+        sort_keys=True,
     )
 
 if "capex_editor_df" not in st.session_state:
@@ -2069,6 +2159,276 @@ if current_step == "context":
         height=140,
     )
     st.caption("※ 記入した内容はウィザード内で保持され、事業計画書作成時の定性情報として活用できます。")
+
+    st.markdown("#### マーケティング戦略（4P/3C入力）")
+    st.caption(
+        "製品（Product）・価格（Price）・流通チャネル（Place）・プロモーション（Promotion）の4Pは、"
+        "マーケティングミックスの基本構成要素であり、効果的な市場戦略を組み立てる土台となります（Investopedia）。"
+    )
+    st.markdown("##### 4Pの現状整理と課題")
+    st.caption("現状・課題・重視するKPIを記入すると、下部で強化策が自動提案されます。")
+
+    four_p_state = marketing_state.get("four_p", {})
+    for key in FOUR_P_KEYS:
+        label = FOUR_P_LABELS[key]
+        entry = four_p_state.get(key, {})
+        guide = FOUR_P_INPUT_GUIDE.get(key, {})
+        with st.expander(label, expanded=(key == "product")):
+            entry["current"] = st.text_area(
+                f"{label}｜現状の取り組み",
+                value=str(entry.get("current", "")),
+                placeholder=str(guide.get("current", "")),
+                height=130,
+            )
+            entry["challenge"] = st.text_area(
+                f"{label}｜課題・制約",
+                value=str(entry.get("challenge", "")),
+                placeholder=str(guide.get("challenge", "")),
+                height=120,
+            )
+            entry["metric"] = st.text_input(
+                f"{label}｜重視するKPI・数値目標",
+                value=str(entry.get("metric", "")),
+                placeholder=str(guide.get("metric", "")),
+                help="具体的な数値（例：解約率5%、月間リード120件など）を入れると提案が精緻になります。",
+            )
+            if key == "price":
+                try:
+                    current_price = float(entry.get("price_point", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    current_price = 0.0
+                entry["price_point"] = st.number_input(
+                    "自社の主要プラン価格（円・税込/税抜いずれでも可）",
+                    min_value=0.0,
+                    value=current_price,
+                    step=100.0,
+                    help="平均的な契約金額や代表的なプラン価格を入力してください。",
+                )
+
+    st.markdown("##### Customer（市場・顧客）")
+    customer_state = marketing_state.get("customer", {})
+    customer_cols = st.columns(2)
+    with customer_cols[0]:
+        try:
+            market_size_value = float(customer_state.get("market_size", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            market_size_value = 0.0
+        customer_state["market_size"] = st.number_input(
+            "市場規模（円や想定ユーザー数）",
+            min_value=0.0,
+            value=market_size_value,
+            step=1000.0,
+            help="単位は自由です。例：1200000000（円）や2000（社）。",
+        )
+        try:
+            growth_value = float(customer_state.get("growth_rate", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            growth_value = 0.0
+        customer_state["growth_rate"] = st.number_input(
+            "年成長率（%）",
+            min_value=-100.0,
+            max_value=500.0,
+            value=growth_value,
+            step=1.0,
+        )
+    with customer_cols[1]:
+        customer_state["needs"] = st.text_area(
+            "主要ニーズ・顧客課題",
+            value=str(customer_state.get("needs", "")),
+            placeholder=MARKETING_CUSTOMER_PLACEHOLDER["needs"],
+            height=120,
+        )
+        customer_state["segments"] = st.text_area(
+            "顧客セグメント",
+            value=str(customer_state.get("segments", "")),
+            placeholder=MARKETING_CUSTOMER_PLACEHOLDER["segments"],
+            height=120,
+        )
+    customer_state["persona"] = st.text_area(
+        "ターゲット顧客ペルソナ",
+        value=str(customer_state.get("persona", "")),
+        placeholder=MARKETING_CUSTOMER_PLACEHOLDER["persona"],
+        height=110,
+    )
+
+    st.markdown("##### Company（自社の整理）")
+    company_state = marketing_state.get("company", {})
+    company_cols = st.columns(2)
+    with company_cols[0]:
+        company_state["strengths"] = st.text_area(
+            "自社の強み",
+            value=str(company_state.get("strengths", "")),
+            placeholder=MARKETING_COMPANY_PLACEHOLDER["strengths"],
+            height=120,
+        )
+        company_state["resources"] = st.text_area(
+            "差別化リソース・提供体制",
+            value=str(company_state.get("resources", "")),
+            placeholder=MARKETING_COMPANY_PLACEHOLDER["resources"],
+            height=120,
+        )
+    with company_cols[1]:
+        company_state["weaknesses"] = st.text_area(
+            "弱み・制約",
+            value=str(company_state.get("weaknesses", "")),
+            placeholder=MARKETING_COMPANY_PLACEHOLDER["weaknesses"],
+            height=120,
+        )
+        try:
+            service_score_value = float(company_state.get("service_score", 3.0) or 3.0)
+        except (TypeError, ValueError):
+            service_score_value = 3.0
+        company_state["service_score"] = st.number_input(
+            "自社サービス差別化スコア (1-5)",
+            min_value=1.0,
+            max_value=5.0,
+            value=service_score_value,
+            step=0.1,
+            help="顧客体験・サポート品質などを1（低い）〜5（高い）で主観評価します。",
+        )
+
+    st.markdown("##### Competitor（競合比較）")
+    st.caption(MARKETING_COMPETITOR_HELP)
+    competitor_state = marketing_state.get("competitor", {})
+    competitor_cols = st.columns(2)
+    top_state = competitor_state.get("top", {})
+    local_state = competitor_state.get("local", {})
+    with competitor_cols[0]:
+        st.markdown("###### 業界トップ企業")
+        top_state["name"] = st.text_input("企業名", value=str(top_state.get("name", "")))
+        try:
+            top_price_value = float(top_state.get("price", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            top_price_value = 0.0
+        top_state["price"] = st.number_input(
+            "平均価格（円）",
+            min_value=0.0,
+            value=top_price_value,
+            step=1000.0,
+        )
+        try:
+            top_service_value = float(top_state.get("service_score", 3.0) or 3.0)
+        except (TypeError, ValueError):
+            top_service_value = 3.0
+        top_state["service_score"] = st.number_input(
+            "サービス差別化スコア (1-5)",
+            min_value=1.0,
+            max_value=5.0,
+            value=top_service_value,
+            step=0.1,
+        )
+        top_state["strengths"] = st.text_area(
+            "強み",
+            value=str(top_state.get("strengths", "")),
+            height=110,
+        )
+        top_state["weaknesses"] = st.text_area(
+            "弱み",
+            value=str(top_state.get("weaknesses", "")),
+            height=110,
+        )
+        top_state["differentiators"] = st.text_area(
+            "差別化ポイント（数値・指標）",
+            value=str(top_state.get("differentiators", "")),
+            height=90,
+            help="例：導入社数500社、稼働率99%、サポート拠点47都道府県など。",
+        )
+    with competitor_cols[1]:
+        st.markdown("###### 地元・ニッチ競合")
+        local_state["name"] = st.text_input("企業名 (地元)", value=str(local_state.get("name", "")))
+        try:
+            local_price_value = float(local_state.get("price", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            local_price_value = 0.0
+        local_state["price"] = st.number_input(
+            "平均価格（円） (地元)",
+            min_value=0.0,
+            value=local_price_value,
+            step=1000.0,
+        )
+        try:
+            local_service_value = float(local_state.get("service_score", 3.0) or 3.0)
+        except (TypeError, ValueError):
+            local_service_value = 3.0
+        local_state["service_score"] = st.number_input(
+            "サービス差別化スコア (1-5) (地元)",
+            min_value=1.0,
+            max_value=5.0,
+            value=local_service_value,
+            step=0.1,
+        )
+        local_state["strengths"] = st.text_area(
+            "強み (地元)",
+            value=str(local_state.get("strengths", "")),
+            height=110,
+        )
+        local_state["weaknesses"] = st.text_area(
+            "弱み (地元)",
+            value=str(local_state.get("weaknesses", "")),
+            height=110,
+        )
+        local_state["differentiators"] = st.text_area(
+            "差別化ポイント（数値・指標）(地元)",
+            value=str(local_state.get("differentiators", "")),
+            height=90,
+        )
+
+    recommendations = generate_marketing_recommendations(marketing_state, context_state)
+    st.markdown("##### 自動生成された提案")
+    st.caption("入力した4P/3C情報をもとに、強化策とポジショニングのヒントを提示します。")
+
+    recommendation_cols = st.columns(2)
+    four_p_suggestions = recommendations.get("four_p", {})
+    with recommendation_cols[0]:
+        for key in FOUR_P_KEYS[:2]:
+            label = FOUR_P_LABELS[key]
+            st.markdown(f"**{label}の強化策**")
+            lines = four_p_suggestions.get(key, [])
+            if lines:
+                st.markdown("\n".join(f"- {line}" for line in lines))
+            else:
+                st.markdown("- 入力が不足しているため、提案を生成できません。")
+    with recommendation_cols[1]:
+        for key in FOUR_P_KEYS[2:]:
+            label = FOUR_P_LABELS[key]
+            st.markdown(f"**{label}の強化策**")
+            lines = four_p_suggestions.get(key, [])
+            if lines:
+                st.markdown("\n".join(f"- {line}" for line in lines))
+            else:
+                st.markdown("- 入力が不足しているため、提案を生成できません。")
+
+    st.markdown("**競合比較ハイライト**")
+    competitor_highlights = recommendations.get("competitor_highlights", [])
+    if competitor_highlights:
+        st.markdown("\n".join(f"- {item}" for item in competitor_highlights))
+    else:
+        st.markdown("- 競合データが未入力のため、差分分析が表示できません。")
+
+    st.markdown("**顧客価値提案 (UVP)**")
+    st.write(recommendations.get("uvp", ""))
+    st.markdown("**STP提案**")
+    st.markdown(
+        "\n".join(
+            [
+                f"- セグメンテーション: {recommendations.get('segmentation', '')}",
+                f"- ターゲティング: {recommendations.get('targeting', '')}",
+                f"- ポジショニング: {recommendations.get('positioning', '')}",
+            ]
+        )
+    )
+    positioning_points = recommendations.get("positioning_points", [])
+    if positioning_points:
+        st.markdown("\n".join(f"- {point}" for point in positioning_points))
+
+    competitor_table = recommendations.get("competitor_table", [])
+    if competitor_table:
+        competitor_df = pd.DataFrame(competitor_table)
+        st.dataframe(
+            competitor_df,
+            hide_index=True,
+            **use_container_width_kwargs(st.dataframe),
+        )
 
     st.markdown("#### SWOT分析（内部・外部要因の整理）")
     st.caption("強み・弱み・機会・脅威を1〜5段階で評価し、優先度の高い論点を定量的に把握します。")
@@ -3513,6 +3873,7 @@ elif current_step == "tax":
             )
 
 st.session_state[BUSINESS_CONTEXT_KEY] = context_state
+st.session_state[MARKETING_STRATEGY_KEY] = marketing_state
 
 current_context_snapshot = {
     key: str(context_state.get(key, "")) for key in BUSINESS_CONTEXT_TEMPLATE
@@ -3520,6 +3881,18 @@ current_context_snapshot = {
 previous_context_snapshot = st.session_state.get(BUSINESS_CONTEXT_SNAPSHOT_KEY)
 if previous_context_snapshot != current_context_snapshot:
     st.session_state[BUSINESS_CONTEXT_SNAPSHOT_KEY] = current_context_snapshot
+    st.session_state[BUSINESS_CONTEXT_LAST_SAVED_KEY] = (
+        datetime.now().replace(microsecond=0).isoformat()
+    )
+
+marketing_snapshot = json.dumps(
+    marketing_state,
+    ensure_ascii=False,
+    sort_keys=True,
+)
+previous_marketing_snapshot = st.session_state.get(MARKETING_STRATEGY_SNAPSHOT_KEY)
+if previous_marketing_snapshot != marketing_snapshot:
+    st.session_state[MARKETING_STRATEGY_SNAPSHOT_KEY] = marketing_snapshot
     st.session_state[BUSINESS_CONTEXT_LAST_SAVED_KEY] = (
         datetime.now().replace(microsecond=0).isoformat()
     )
