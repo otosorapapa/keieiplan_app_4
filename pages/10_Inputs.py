@@ -397,7 +397,13 @@ def _render_fermi_wizard(sales_df: pd.DataFrame, unit: str) -> None:
     with st.expander("🧮 Fermi推定ウィザード", expanded=expand_default):
         st.markdown(
             "日次の来店数・客単価・営業日数を入力すると、年間売上の中央値/最低/最高レンジを推定します。"
+            " 最小値・中央値・最大値で売上レンジを把握し、シナリオ比較に活用しましょう。"
             " 学習済みの実績データがあれば中央値を自動補正します。"
+        )
+        render_callout(
+            icon="📈",
+            title="レンジ入力の目的",
+            body="最小値は悲観ケース、中央値は標準ケース、最大値は成長ケースとして設定し、年間売上の幅やシナリオ分析に活用しましょう。推定結果はテンプレートの年間売上レンジにも反映できます。",
         )
         options_map = {
             f"{idx + 1}. {str(row.get('チャネル', ''))}/{str(row.get('商品', ''))}": idx
@@ -406,6 +412,7 @@ def _render_fermi_wizard(sales_df: pd.DataFrame, unit: str) -> None:
         option_labels = list(options_map.keys())
         option_labels.append("新規行として追加")
 
+        apply_learning = False
         with st.form("fermi_wizard_form"):
             selection = st.selectbox("適用先", option_labels, key="fermi_target_selection")
             target_index = options_map.get(selection)
@@ -498,11 +505,17 @@ def _render_fermi_wizard(sales_df: pd.DataFrame, unit: str) -> None:
                 index=0,
                 key="fermi_seasonal_key",
             )
-            apply_learning = st.checkbox(
-                "実績から中央値を補正",
-                value=bool(history),
-                key="fermi_apply_learning",
-            )
+            if history:
+                default_learning = bool(st.session_state.get("fermi_apply_learning", True))
+                apply_learning = st.toggle(
+                    "過去実績から中央値を自動推定",
+                    value=default_learning,
+                    key="fermi_apply_learning",
+                    help="保存済みの実績データと計画の比率を参照して中央値のみ自動補正します。",
+                )
+            else:
+                st.caption("※ 過去実績を保存すると中央値を自動推定するスイッチが表示されます。")
+                apply_learning = False
             submitted = st.form_submit_button("推定を計算", type="secondary")
 
         if submitted:
@@ -840,6 +853,16 @@ def _render_sales_guide_panel() -> None:
                 <li title="商品ライフサイクルに応じた山谷を設定">商品ごとに月別の山谷を設定し、販促や季節性を織り込みます。</li>
                 <li title="テンプレートはCSV/Excelでオフライン編集可能">テンプレートはダウンロードしてオフラインで編集し、同じ形式でアップロードできます。</li>
             </ul>
+            <div style="margin-top:1rem;padding:0.8rem 1rem;background-color:rgba(255,255,255,0.9);border:1px dashed #5f7da8;border-radius:0.75rem;line-height:1.6;">
+                <strong style="display:block;margin-bottom:0.25rem;">オンラインチャネルの例</strong>
+                <span style="display:block;">1日の平均来店数40人 × 平均客単価3,500円 × 月24日営業</span>
+                <span style="display:block;margin-top:0.2rem;font-size:1.05rem;font-weight:600;">→ 年間売上336万円</span>
+                <span style="display:block;margin-top:0.2rem;font-size:0.8rem;color:#1f3b5b;">※12か月営業で年間約4,032万円。数値を変えながらレンジを検討しましょう。</span>
+            </div>
+            <p style="margin-top:0.75rem;font-size:0.85rem;color:#1f3b5b;line-height:1.6;">
+                最小値・中央値・最大値は、売上の下限〜上限レンジを把握し、悲観/標準/楽観シナリオを比較するための入力です。<br/>
+                過去データがある場合はフェルミ推定ウィザードのスイッチで中央値を自動補正できます。
+            </p>
         </div>
         """,
         unsafe_allow_html=True,
