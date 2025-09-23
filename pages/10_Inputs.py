@@ -736,7 +736,7 @@ def _maybe_show_tutorial(step_id: str, message: str) -> None:
         shown = set()
     if step_id in shown:
         return
-    st.toast(message, icon="✦")
+    st.toast(message, icon="✨")
     shown.add(step_id)
     st.session_state["tutorial_shown_steps"] = shown
 
