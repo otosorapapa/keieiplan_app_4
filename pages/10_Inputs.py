@@ -109,6 +109,32 @@ INDUSTRY_TEMPLATE_KEY = "selected_industry_template"
 
 FERMI_RESULT_STATE_KEY = "fermi_last_estimate"
 COST_RANGE_STATE_KEY = "cost_range_profiles"
+FINANCIAL_SERIES_STATE_KEY = "financial_timeseries"
+FINANCIAL_CATEGORY_OPTIONS = ("実績", "計画")
+FINANCIAL_SERIES_COLUMNS = [
+    "年度",
+    "区分",
+    "売上高",
+    "粗利益率",
+    "営業利益率",
+    "固定費",
+    "変動費",
+    "設備投資額",
+    "借入残高",
+    "減価償却費",
+    "総資産",
+]
+FINANCIAL_SERIES_NUMERIC_COLUMNS = [
+    "売上高",
+    "粗利益率",
+    "営業利益率",
+    "固定費",
+    "変動費",
+    "設備投資額",
+    "借入残高",
+    "減価償却費",
+    "総資産",
+]
 
 WIZARD_STEPS = [
     {
@@ -167,6 +193,109 @@ BUSINESS_CONTEXT_SNAPSHOT_KEY = "business_context_snapshot"
 BUSINESS_CONTEXT_LAST_SAVED_KEY = "business_context_last_saved_at"
 
 
+def _default_financial_timeseries(fiscal_year: int) -> pd.DataFrame:
+    """Return a template dataframe for 3年実績 + 5年計画."""
+
+    records: List[Dict[str, object]] = []
+    start_year = fiscal_year - 3
+    for offset in range(8):
+        year = start_year + offset
+        category = "実績" if year < fiscal_year else "計画"
+        record: Dict[str, object] = {
+            "年度": int(year),
+            "区分": category,
+        }
+        for column in FINANCIAL_SERIES_NUMERIC_COLUMNS:
+            record[column] = 0.0
+        records.append(record)
+    return pd.DataFrame(records, columns=FINANCIAL_SERIES_COLUMNS)
+
+
+def _load_financial_timeseries_df(fiscal_year: int) -> pd.DataFrame:
+    """Load the financial time-series editor dataframe from session state."""
+
+    stored_state: Dict[str, object] = st.session_state.get(FINANCIAL_SERIES_STATE_KEY, {})
+    records = stored_state.get("records") if isinstance(stored_state, dict) else None
+    if isinstance(records, list) and records:
+        df = pd.DataFrame(records)
+    else:
+        df = _default_financial_timeseries(fiscal_year)
+
+    df = df.copy()
+    if "年度" not in df.columns:
+        df["年度"] = [fiscal_year - 3 + idx for idx in range(len(df))]
+    df["年度"] = pd.to_numeric(df["年度"], errors="coerce").fillna(fiscal_year).astype(int)
+
+    if "区分" not in df.columns:
+        df["区分"] = ["実績" if year < fiscal_year else "計画" for year in df["年度"]]
+    else:
+        categories: List[str] = []
+        for raw, year in zip(df["区分"], df["年度"]):
+            label = str(raw).strip()
+            if label not in FINANCIAL_CATEGORY_OPTIONS:
+                label = "実績" if year <= fiscal_year - 1 else "計画"
+            categories.append(label)
+        df["区分"] = categories
+
+    for column in FINANCIAL_SERIES_COLUMNS:
+        if column not in df.columns:
+            if column in FINANCIAL_SERIES_NUMERIC_COLUMNS:
+                df[column] = 0.0
+            elif column == "年度":
+                continue
+            else:
+                df[column] = ""
+
+    for column in FINANCIAL_SERIES_NUMERIC_COLUMNS:
+        df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+
+    category_order = {label: index for index, label in enumerate(FINANCIAL_CATEGORY_OPTIONS)}
+    df["_category_order"] = df["区分"].map(category_order).fillna(0)
+    df = (
+        df[FINANCIAL_SERIES_COLUMNS + ["_category_order"]]
+        .sort_values(["年度", "_category_order"])
+        .drop(columns="_category_order")
+        .reset_index(drop=True)
+    )
+    return df
+
+
+def _persist_financial_timeseries(df: pd.DataFrame, fiscal_year: int) -> None:
+    """Store the edited financial time-series dataframe back to session state."""
+
+    sanitized = df.copy()
+    if "年度" not in sanitized.columns:
+        sanitized["年度"] = [fiscal_year for _ in range(len(sanitized))]
+    sanitized["年度"] = pd.to_numeric(sanitized["年度"], errors="coerce").fillna(fiscal_year).astype(int)
+
+    if "区分" not in sanitized.columns:
+        sanitized["区分"] = ["実績" if year <= fiscal_year - 1 else "計画" for year in sanitized["年度"]]
+    else:
+        sanitized["区分"] = [
+            str(value).strip() if str(value).strip() in FINANCIAL_CATEGORY_OPTIONS else ("実績" if year <= fiscal_year - 1 else "計画")
+            for value, year in zip(sanitized["区分"], sanitized["年度"])
+        ]
+
+    for column in FINANCIAL_SERIES_NUMERIC_COLUMNS:
+        sanitized[column] = pd.to_numeric(sanitized.get(column, 0.0), errors="coerce").fillna(0.0)
+
+    records: List[Dict[str, object]] = []
+    for _, row in sanitized.iterrows():
+        record: Dict[str, object] = {
+            "年度": int(row["年度"]),
+            "区分": str(row["区分"]),
+        }
+        for column in FINANCIAL_SERIES_NUMERIC_COLUMNS:
+            value = float(row[column]) if pd.notna(row[column]) else 0.0
+            record[column] = value
+        records.append(record)
+
+    st.session_state[FINANCIAL_SERIES_STATE_KEY] = {
+        "records": records,
+        "base_year": int(fiscal_year),
+    }
+
+
 def _build_snapshot_payload() -> Dict[str, object]:
     """Collect the current session state into a serialisable snapshot."""
 
@@ -177,6 +306,7 @@ def _build_snapshot_payload() -> Dict[str, object]:
         "working_capital_profile": st.session_state.get("working_capital_profile", {}),
         "what_if_scenarios": st.session_state.get("what_if_scenarios", {}),
         "business_context": st.session_state.get(BUSINESS_CONTEXT_KEY, {}),
+        "financial_timeseries": st.session_state.get(FINANCIAL_SERIES_STATE_KEY, {}),
         "generated_at": datetime.utcnow().isoformat(),
     }
     scenario_df_state = st.session_state.get("scenario_df")
@@ -221,6 +351,8 @@ def _hydrate_snapshot(snapshot: Dict[str, object]) -> bool:
         st.session_state["scenario_df"] = pd.DataFrame(scenario_df_state)
     if "business_context" in snapshot and isinstance(snapshot["business_context"], dict):
         st.session_state[BUSINESS_CONTEXT_KEY] = snapshot["business_context"]
+    if "financial_timeseries" in snapshot and isinstance(snapshot["financial_timeseries"], dict):
+        st.session_state[FINANCIAL_SERIES_STATE_KEY] = snapshot["financial_timeseries"]
     return True
 
 
@@ -2646,6 +2778,86 @@ elif current_step == "tax":
             f"<div class='metric-card' title='粗利益率＝(売上−売上原価)÷売上。製造業では30%を超えると優良とされます。'>📊 <strong>平均原価率</strong><br/><span style='font-size:1.4rem;'>{format_ratio(avg_ratio)}</span></div>",
             unsafe_allow_html=True,
         )
+
+    fiscal_year = int(settings_state.get("fiscal_year", datetime.now().year))
+    st.markdown("#### 財務指標（実績・計画）入力")
+    st.caption(
+        "過去3年分の実績と今後5年分の計画値を入力してください。粗利益率・営業利益率は百分率（例：40 → 40%）で入力します。"
+    )
+    financial_editor_df = _load_financial_timeseries_df(fiscal_year)
+    financial_column_config = {
+        "年度": st.column_config.NumberColumn(
+            "年度",
+            format="%d",
+            min_value=2000,
+            max_value=2100,
+            step=1,
+            help="会計年度。必要に応じて修正できます。",
+        ),
+        "区分": st.column_config.SelectboxColumn(
+            "区分",
+            options=list(FINANCIAL_CATEGORY_OPTIONS),
+            help="過年度は実績、将来は計画を選択します。",
+        ),
+        "売上高": st.column_config.NumberColumn(
+            "売上高 (円)",
+            format="%.0f",
+            help="各年度の売上高。単位は円です。",
+        ),
+        "粗利益率": st.column_config.NumberColumn(
+            "粗利益率(%)",
+            format="%.1f",
+            help="粗利益率を百分率で入力します (例: 40 → 40%)。",
+        ),
+        "営業利益率": st.column_config.NumberColumn(
+            "営業利益率(%)",
+            format="%.1f",
+            help="営業利益率を百分率で入力します。",
+        ),
+        "固定費": st.column_config.NumberColumn(
+            "固定費 (円)",
+            format="%.0f",
+            help="人件費や地代などの年間固定費。",
+        ),
+        "変動費": st.column_config.NumberColumn(
+            "変動費 (円)",
+            format="%.0f",
+            help="仕入原価などの年間変動費。",
+        ),
+        "設備投資額": st.column_config.NumberColumn(
+            "設備投資額 (円)",
+            format="%.0f",
+            help="当該年度に予定するCAPEX。",
+        ),
+        "借入残高": st.column_config.NumberColumn(
+            "借入残高 (円)",
+            format="%.0f",
+            help="決算時点の有利子負債残高。",
+        ),
+        "減価償却費": st.column_config.NumberColumn(
+            "減価償却費 (円)",
+            format="%.0f",
+            help="任意入力。EBITDA算出に利用します。",
+        ),
+        "総資産": st.column_config.NumberColumn(
+            "総資産 (円)",
+            format="%.0f",
+            help="任意入力。ROA計算に利用します。",
+        ),
+    }
+
+    edited_financial_df = st.data_editor(
+        financial_editor_df,
+        key="financial_timeseries_editor",
+        hide_index=True,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config=financial_column_config,
+    )
+    _persist_financial_timeseries(edited_financial_df, fiscal_year)
+    st.caption(
+        "金額は円ベースで入力してください。EBITDA・FCF・ROAなどの自動計算結果はAnalysisページで確認できます。"
+    )
 
     if validation_errors:
         st.warning("入力内容にエラーがあります。該当ステップに戻って赤枠の項目を修正してください。")
