@@ -2,19 +2,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, Mapping, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, Tuple, TypeVar, cast
 
 import pandas as pd
 import streamlit as st
 
 from models import (
+    CapexPlan,
+    CostPlan,
     DEFAULT_CAPEX_PLAN,
     DEFAULT_COST_PLAN,
     DEFAULT_LOAN_SCHEDULE,
     DEFAULT_SALES_PLAN,
     DEFAULT_TAX_POLICY,
     FinanceBundle,
+    LoanSchedule,
+    SalesPlan,
+    TaxPolicy,
 )
+from pydantic import BaseModel, ValidationError
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
 
 StateFactory = Callable[[], Any]
 TypeHint = type | tuple[type, ...] | None
@@ -129,6 +137,30 @@ def reset_app_state(preserve: Iterable[str] | None = None) -> None:
     ensure_session_defaults()
 
 
+def _ensure_model_instance(value: object, model_cls: type[ModelT]) -> ModelT:
+    """Coerce *value* into an instance of *model_cls* if possible."""
+
+    if isinstance(value, model_cls):
+        return value
+    if isinstance(value, BaseModel):
+        return model_cls.model_validate(value)
+    if isinstance(value, Mapping):
+        return model_cls.model_validate(dict(value))
+    raise TypeError(f"Unsupported value for {model_cls.__name__}: {type(value).__name__}")
+
+
+def _deep_copy_model(model: ModelT) -> ModelT:
+    """Return a deep copy of a Pydantic model, supporting v1/v2 APIs."""
+
+    copy_method = getattr(model, "model_copy", None)
+    if callable(copy_method):
+        return cast(ModelT, copy_method(deep=True))
+    legacy_copy = getattr(model, "copy", None)
+    if callable(legacy_copy):  # pragma: no cover - fallback for pydantic v1
+        return cast(ModelT, legacy_copy(deep=True))
+    return model
+
+
 def load_finance_bundle() -> Tuple[FinanceBundle, bool]:
     """Return the validated finance bundle from session or defaults.
 
@@ -141,14 +173,25 @@ def load_finance_bundle() -> Tuple[FinanceBundle, bool]:
     required_keys = {"sales", "costs", "capex", "loans", "tax"}
     if required_keys.issubset(models_state.keys()):
         try:
+            validated_models = {
+                "sales": _ensure_model_instance(models_state["sales"], SalesPlan),
+                "costs": _ensure_model_instance(models_state["costs"], CostPlan),
+                "capex": _ensure_model_instance(models_state["capex"], CapexPlan),
+                "loans": _ensure_model_instance(models_state["loans"], LoanSchedule),
+                "tax": _ensure_model_instance(models_state["tax"], TaxPolicy),
+            }
+            deep_copies = {key: _deep_copy_model(model) for key, model in validated_models.items()}
+            st.session_state["finance_models"] = deep_copies
             bundle = FinanceBundle(
-                sales=models_state["sales"],
-                costs=models_state["costs"],
-                capex=models_state["capex"],
-                loans=models_state["loans"],
-                tax=models_state["tax"],
+                sales=deep_copies["sales"],
+                costs=deep_copies["costs"],
+                capex=deep_copies["capex"],
+                loans=deep_copies["loans"],
+                tax=deep_copies["tax"],
             )
             return bundle, True
+        except (ValidationError, TypeError, ValueError):
+            pass
         except Exception:  # pragma: no cover - defensive guard
             pass
 
