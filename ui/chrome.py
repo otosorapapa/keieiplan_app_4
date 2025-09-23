@@ -108,7 +108,7 @@ def render_app_header(
         with account_col:
             current_user = auth.get_current_user()
             account_label = (
-                f"🔐 {current_user.display_name}" if current_user else "🔑 ログイン"
+                f"▣ {current_user.display_name}" if current_user else "⎔ ログイン"
             )
             with st.popover(account_label, help="保存やバージョン管理を行うにはログインしてください。"):
                 if current_user:
@@ -118,7 +118,7 @@ def render_app_header(
                     st.caption("役割: " + ("管理者" if current_user.role == "admin" else "メンバー"))
                     if st.button("ログアウト", key="header_logout_button", help="セキュアにセッションを終了します。"):
                         auth.logout_user()
-                        st.toast("ログアウトしました。", icon="👋")
+                        st.toast("ログアウトしました。", icon="◇")
                         logout_requested = True
                         st.experimental_rerun()
                 else:

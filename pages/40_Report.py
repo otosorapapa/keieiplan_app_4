@@ -35,7 +35,7 @@ from theme import THEME_COLORS, inject_theme
 
 st.set_page_config(
     page_title="経営計画スタジオ｜Report",
-    page_icon="📝",
+    page_icon="報",
     layout="wide",
 )
 
@@ -65,7 +65,7 @@ amounts = compute(plan_cfg)
 metrics = summarize_plan_metrics(amounts)
 cash_flow_data = generate_cash_flow(amounts, bundle.capex, bundle.loans, bundle.tax)
 
-st.title("📝 レポート出力")
+st.title("レポート出力")
 st.caption("主要指標とKPIのサマリーをPDF / Excel / Word形式でダウンロードできます。")
 
 SUPPORT_CONTACT = "support@keieiplan.jp"
@@ -560,19 +560,19 @@ with st.form("report_options_form"):
             }
         )
         st.session_state["report_options"] = report_options
-        st.success("レポート設定を更新しました。", icon="✅")
+        st.success("レポート設定を更新しました。", icon="✔")
 
 logo_upload = st.file_uploader("企業ロゴ (PNG/JPG/SVG)", type=["png", "jpg", "jpeg", "svg"], key="report_logo_upload")
 if logo_upload is not None:
     st.session_state["report_logo_bytes"] = logo_upload.getvalue()
     st.session_state["report_logo_name"] = logo_upload.name
-    st.toast("ロゴを読み込みました。", icon="🖼️")
+    st.toast("ロゴを読み込みました。", icon="図")
 
 seal_upload = st.file_uploader("印影画像 (PNG/JPG)", type=["png", "jpg", "jpeg"], key="report_seal_upload")
 if seal_upload is not None:
     st.session_state["report_seal_bytes"] = seal_upload.getvalue()
     st.session_state["report_seal_name"] = seal_upload.name
-    st.toast("印影を読み込みました。", icon="🖋️")
+    st.toast("印影を読み込みました。", icon="印")
 
 logo_bytes = (
     st.session_state.get("report_logo_bytes") if report_options.get("include_logo", True) else None
@@ -636,7 +636,7 @@ with pdf_tab:
         )
         if pdf_bytes is not None:
             st.download_button(
-                "📄 PDFダウンロード",
+                "［PDF］ダウンロード",
                 data=pdf_bytes,
                 file_name=f"plan_report_{fiscal_year}.pdf",
                 mime="application/pdf",
@@ -660,7 +660,7 @@ with excel_tab:
         )
         if excel_bytes is not None:
             st.download_button(
-                "📊 Excelダウンロード",
+                "［Excel］ダウンロード",
                 data=excel_bytes,
                 file_name=f"plan_report_{fiscal_year}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -689,7 +689,7 @@ with word_tab:
         )
         if word_bytes is not None:
             st.download_button(
-                "📝 Wordダウンロード",
+                "［Word］ダウンロード",
                 data=word_bytes,
                 file_name=f"plan_report_{fiscal_year}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",

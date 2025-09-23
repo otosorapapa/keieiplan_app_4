@@ -22,9 +22,9 @@ class MetricCard:
 
 
 _TONE_BADGES: dict[str, tuple[str, str]] = {
-    "positive": ("🟢", "好調"),
-    "caution": ("⚠️", "注意"),
-    "negative": ("🔴", "警戒"),
+    "positive": ("▲", "好調"),
+    "caution": ("△", "注意"),
+    "negative": ("▼", "警戒"),
 }
 
 
