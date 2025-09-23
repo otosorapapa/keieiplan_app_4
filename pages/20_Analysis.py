@@ -71,6 +71,370 @@ PEST_DIRECTIONS = ("機会", "脅威")
 SWOT_DISPLAY_COLUMNS = ["分類", "要因", "重要度", "確度", "スコア", "備考"]
 PEST_DISPLAY_COLUMNS = ["区分", "要因", "影響方向", "影響度", "確度", "スコア", "備考"]
 
+BSC_STATE_KEY = "balanced_scorecard"
+BSC_PERSPECTIVES: List[Dict[str, object]] = [
+    {
+        "key": "financial",
+        "label": "財務",
+        "metrics": [
+            {
+                "key": "revenue",
+                "label": "売上高",
+                "unit_type": "plan_unit",
+                "direction": "higher",
+                "precision": 1,
+                "allow_negative": False,
+                "step": 10.0,
+                "description": "年間売上の目標金額。資金繰りに直結する最重要指標です。",
+            },
+            {
+                "key": "operating_margin",
+                "label": "営業利益率",
+                "unit_type": "percent",
+                "direction": "higher",
+                "precision": 1,
+                "allow_negative": True,
+                "description": "営業利益÷売上高。収益性とコスト構造の健全性を測る指標です。",
+            },
+            {
+                "key": "payback_period",
+                "label": "資本回収期間",
+                "unit_type": "year",
+                "direction": "lower",
+                "precision": 1,
+                "allow_negative": False,
+                "description": "投資額をキャッシュフローで回収するまでの年数。短いほど望ましい指標です。",
+            },
+        ],
+    },
+    {
+        "key": "customer",
+        "label": "顧客",
+        "metrics": [
+            {
+                "key": "customer_satisfaction",
+                "label": "顧客満足度",
+                "unit_type": "score",
+                "direction": "higher",
+                "precision": 1,
+                "allow_negative": False,
+                "description": "アンケートやNPSなどで測定する顧客体験スコア。",
+            },
+            {
+                "key": "repeat_rate",
+                "label": "リピート率",
+                "unit_type": "percent",
+                "direction": "higher",
+                "precision": 1,
+                "allow_negative": False,
+                "description": "既存顧客の再購入比率。LTVと売上の安定性に寄与します。",
+            },
+            {
+                "key": "churn_rate",
+                "label": "解約率",
+                "unit_type": "percent",
+                "direction": "lower",
+                "precision": 1,
+                "allow_negative": False,
+                "description": "契約顧客の離脱割合。サブスクやリカーリングビジネスで重要です。",
+            },
+        ],
+    },
+    {
+        "key": "process",
+        "label": "業務プロセス",
+        "metrics": [
+            {
+                "key": "lead_time",
+                "label": "生産リードタイム",
+                "unit_type": "days",
+                "direction": "lower",
+                "precision": 1,
+                "allow_negative": False,
+                "description": "受注から納品までの平均日数。短縮で在庫と顧客満足に貢献します。",
+            },
+            {
+                "key": "defect_rate",
+                "label": "不良率",
+                "unit_type": "percent",
+                "direction": "lower",
+                "precision": 2,
+                "allow_negative": False,
+                "description": "生産品に占める不良品の割合。品質管理の指標です。",
+            },
+            {
+                "key": "inventory_turnover",
+                "label": "在庫回転率",
+                "unit_type": "times",
+                "direction": "higher",
+                "precision": 1,
+                "allow_negative": False,
+                "description": "年間の在庫回転回数。高いほど在庫効率が良いことを示します。",
+            },
+        ],
+    },
+    {
+        "key": "learning",
+        "label": "学習と成長",
+        "metrics": [
+            {
+                "key": "training_hours",
+                "label": "従業員の教育時間",
+                "unit_type": "hours",
+                "direction": "higher",
+                "precision": 1,
+                "allow_negative": False,
+                "description": "年間の平均研修時間。スキル醸成と能力開発の指標です。",
+            },
+            {
+                "key": "employee_satisfaction",
+                "label": "従業員満足度",
+                "unit_type": "score",
+                "direction": "higher",
+                "precision": 1,
+                "allow_negative": False,
+                "description": "従業員エンゲージメントやES調査のスコア。",
+            },
+            {
+                "key": "ideas_submitted",
+                "label": "提案件数",
+                "unit_type": "count",
+                "direction": "higher",
+                "precision": 0,
+                "allow_negative": False,
+                "description": "業務改善や新規提案の件数。現場からの学習フィードバックを表します。",
+            },
+        ],
+    },
+]
+
+BSC_METRIC_LOOKUP: Dict[str, Dict[str, object]] = {
+    metric["key"]: metric
+    for perspective in BSC_PERSPECTIVES
+    for metric in perspective["metrics"]
+}
+
+BSC_SUGGESTION_LIBRARY: Dict[str, List[Dict[str, str]]] = {
+    "revenue": [
+        {
+            "cause": "新規顧客開拓数が不足している",
+            "action": "デジタル広告投資の増加や紹介キャンペーンでリード獲得を強化する",
+        },
+        {
+            "cause": "販売チャネルの稼働率が低く受注率が伸びない",
+            "action": "営業プロセスを再設計し、提案ストーリーや価格条件の最適化を図る",
+        },
+    ],
+    "operating_margin": [
+        {
+            "cause": "原価や販管費のコントロールが甘く利益率を圧迫している",
+            "action": "主要コストドライバーを特定し、調達交渉や自動化投資で費用構造を是正する",
+        },
+        {
+            "cause": "高粗利の商材構成比が低い",
+            "action": "商品ミックスを見直し、ハイマージン商材の販売インセンティブを強化する",
+        },
+    ],
+    "payback_period": [
+        {
+            "cause": "初期投資が大きくキャッシュ創出が追いついていない",
+            "action": "投資効果の早い案件を優先し、スモールスタートで段階的に投資を進める",
+        },
+        {
+            "cause": "営業キャッシュフローが想定より低調",
+            "action": "価格改定やアップセル施策でキャッシュインを前倒しし、回収速度を高める",
+        },
+    ],
+    "customer_satisfaction": [
+        {
+            "cause": "サポート品質や導入後フォローが不足",
+            "action": "カスタマーサクセス体制を整備し、オンボーディングプログラムを強化する",
+        },
+        {
+            "cause": "製品UI/UXがニーズに合致していない",
+            "action": "顧客インタビューを通じた改善サイクルを高速化し、ロードマップに反映する",
+        },
+    ],
+    "repeat_rate": [
+        {
+            "cause": "定期購入プランやクロスセルの設計が弱い",
+            "action": "リピート特典やサブスクプランを導入し、利用頻度を高める",
+        },
+        {
+            "cause": "顧客接点でのパーソナライズが不足",
+            "action": "CRMデータを活用したセグメント別コミュニケーションで再購買を促す",
+        },
+    ],
+    "churn_rate": [
+        {
+            "cause": "定期顧客の離反率が高い",
+            "action": "ロイヤリティプログラムや定期フォローの仕組みを導入し、解約防止を図る",
+        },
+        {
+            "cause": "トラブル時の対応が遅く満足度が低下している",
+            "action": "サポート要員を増員し、FAQやセルフサービス導線を整備する",
+        },
+    ],
+    "lead_time": [
+        {
+            "cause": "工程間のリードタイムが長くボトルネックが発生",
+            "action": "工程別のタクトタイムを可視化し、ボトルネック工程への人員再配置を行う",
+        },
+        {
+            "cause": "在庫補充計画が最適化されていない",
+            "action": "需要予測と連動したMRPを導入し、段取り替え回数を削減する",
+        },
+    ],
+    "defect_rate": [
+        {
+            "cause": "標準作業が徹底されておらず品質ばらつきが大きい",
+            "action": "QCサークルやポカヨケなどの品質管理手法を導入し、検査工程を自動化する",
+        },
+        {
+            "cause": "仕入先品質に起因する不良が多い",
+            "action": "サプライヤー評価を実施し、協働による品質改善プロジェクトを立ち上げる",
+        },
+    ],
+    "inventory_turnover": [
+        {
+            "cause": "需要予測の精度が低く在庫が過剰",
+            "action": "需要シグナルをリアルタイムで取得し、在庫補充の自動化と安全在庫の見直しを行う",
+        },
+        {
+            "cause": "滞留在庫の整理が進んでいない",
+            "action": "ABC分析で重点SKUを特定し、廃番や値引き販売で在庫を圧縮する",
+        },
+    ],
+    "training_hours": [
+        {
+            "cause": "計画的な研修プログラムが不足",
+            "action": "年間育成ロードマップを策定し、eラーニングと集合研修を組み合わせる",
+        },
+        {
+            "cause": "現場が多忙で学習時間を確保できない",
+            "action": "業務の自動化やシフト再設計で学習時間を確保し、学習KPIを評価制度に連動させる",
+        },
+    ],
+    "employee_satisfaction": [
+        {
+            "cause": "評価・報酬への納得感が低い",
+            "action": "1on1やフィードバックサイクルを整備し、評価基準を透明化する",
+        },
+        {
+            "cause": "ワークライフバランスが悪化",
+            "action": "柔軟な働き方の導入や業務プロセス改善で残業時間を削減する",
+        },
+    ],
+    "ideas_submitted": [
+        {
+            "cause": "改善提案のインセンティブが弱く声が上がらない",
+            "action": "表彰制度や小さな改善を称える仕組みを導入し、提案文化を醸成する",
+        },
+        {
+            "cause": "アイデアを具現化する支援が不足",
+            "action": "ハッカソンや実験予算を設け、プロトタイピング支援で実行まで伴走する",
+        },
+    ],
+}
+
+
+def _to_float(value: object, default: float = 0.0) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if np.isnan(number) or np.isinf(number):
+        return default
+    return number
+
+
+def _ensure_bsc_state() -> Dict[str, Dict[str, Dict[str, float]]]:
+    state_raw = st.session_state.get(BSC_STATE_KEY, {})
+    if not isinstance(state_raw, dict):
+        state_raw = {}
+    for perspective in BSC_PERSPECTIVES:
+        perspective_key = str(perspective.get("key", ""))
+        metrics_state = state_raw.get(perspective_key)
+        if not isinstance(metrics_state, dict):
+            metrics_state = {}
+        for metric in perspective.get("metrics", []):
+            metric_key = str(metric.get("key", ""))
+            metric_state = metrics_state.get(metric_key)
+            if not isinstance(metric_state, dict):
+                metric_state = {}
+            target = _to_float(metric_state.get("target", 0.0), 0.0)
+            actual = _to_float(metric_state.get("actual", 0.0), 0.0)
+            metrics_state[metric_key] = {"target": target, "actual": actual}
+        state_raw[perspective_key] = metrics_state
+    st.session_state[BSC_STATE_KEY] = state_raw
+    return state_raw
+
+
+def _bsc_precision(metric_cfg: Mapping[str, object]) -> int:
+    try:
+        precision = int(metric_cfg.get("precision", 1))
+    except (TypeError, ValueError):
+        return 1
+    return max(0, precision)
+
+
+def _bsc_step(metric_cfg: Mapping[str, object]) -> float:
+    step_value = metric_cfg.get("step")
+    if isinstance(step_value, (int, float)) and not isinstance(step_value, bool):
+        return float(step_value)
+    precision = _bsc_precision(metric_cfg)
+    if precision == 0:
+        return 1.0
+    return float(round(10 ** (-precision), precision))
+
+
+def _bsc_unit_label(metric_cfg: Mapping[str, object], plan_unit: str) -> str:
+    unit_type = str(metric_cfg.get("unit_type", ""))
+    mapping = {
+        "percent": "%",
+        "hours": "時間",
+        "days": "日",
+        "times": "回",
+        "count": "件",
+        "score": "点",
+        "year": "年",
+    }
+    if unit_type == "plan_unit":
+        return plan_unit
+    return mapping.get(unit_type, "")
+
+
+def _format_bsc_number(metric_cfg: Mapping[str, object], value: float, plan_unit: str) -> str:
+    precision = _bsc_precision(metric_cfg)
+    unit_type = str(metric_cfg.get("unit_type", ""))
+    if unit_type == "percent":
+        return f"{value:.{precision}f}%"
+    number_text = (
+        f"{value:,.{precision}f}"
+        if precision > 0
+        else f"{value:,.0f}"
+    )
+    unit_label = _bsc_unit_label(metric_cfg, plan_unit)
+    if unit_label:
+        return f"{number_text}{unit_label}"
+    return number_text
+
+
+def _compute_bsc_progress(actual: float, target: float, direction: str) -> float | None:
+    if direction == "higher":
+        if target <= 0:
+            return None
+        return actual / target
+    if direction == "lower":
+        if target <= 0:
+            return 1.0 if actual <= target else 0.0
+        if actual <= target:
+            return 1.0
+        if actual <= 0:
+            return None
+        return target / actual
+    return None
+
 
 def _strategic_records_from_state(key: str) -> List[Dict[str, object]]:
     state = st.session_state.get(STRATEGIC_ANALYSIS_KEY, {})
@@ -1186,6 +1550,201 @@ with kpi_tab:
 
     if cards:
         render_metric_cards(cards, grid_aria_label="カスタムKPI")
+
+    st.markdown("### バランス・スコアカード")
+    st.caption(
+        "財務・顧客・業務プロセス・学習と成長の4視点で目標と実績を入力し、達成度をレーダーと進捗バーで確認します。"
+    )
+    bsc_state = _ensure_bsc_state()
+    perspective_results: List[Dict[str, object]] = []
+    improvement_entries: List[Dict[str, object]] = []
+    has_input = False
+
+    for perspective in BSC_PERSPECTIVES:
+        perspective_key = str(perspective.get("key", ""))
+        perspective_label = str(perspective.get("label", perspective_key))
+        metrics_cfg = perspective.get("metrics", [])
+        metrics_state = bsc_state.get(perspective_key, {})
+        st.markdown(f"#### {perspective_label}視点")
+        perspective_progress: List[float] = []
+
+        for metric_cfg in metrics_cfg:
+            metric_key = str(metric_cfg.get("key", ""))
+            metric_label = str(metric_cfg.get("label", metric_key))
+            metric_state = metrics_state.get(metric_key, {})
+            target_default = _to_float(metric_state.get("target", 0.0), 0.0)
+            actual_default = _to_float(metric_state.get("actual", 0.0), 0.0)
+            precision = _bsc_precision(metric_cfg)
+            step = _bsc_step(metric_cfg)
+            number_format = f"%.{precision}f"
+            allow_negative = bool(metric_cfg.get("allow_negative", True))
+            min_value = None if allow_negative else 0.0
+
+            row_cols = st.columns((2.4, 1.2, 1.2))
+            target_kwargs = {
+                "value": float(target_default),
+                "step": step,
+                "key": f"bsc_{perspective_key}_{metric_key}_target",
+                "format": number_format,
+            }
+            actual_kwargs = {
+                "value": float(actual_default),
+                "step": step,
+                "key": f"bsc_{perspective_key}_{metric_key}_actual",
+                "format": number_format,
+            }
+            if min_value is not None:
+                target_kwargs["min_value"] = float(min_value)
+                actual_kwargs["min_value"] = float(min_value)
+
+            with row_cols[1]:
+                target_value = st.number_input("目標値", **target_kwargs)
+            with row_cols[2]:
+                actual_value = st.number_input("実績値", **actual_kwargs)
+
+            metrics_state[metric_key] = {"target": target_value, "actual": actual_value}
+            is_populated = abs(target_value) > 0 or abs(actual_value) > 0
+            if is_populated:
+                has_input = True
+
+            direction = str(metric_cfg.get("direction", "higher"))
+            progress_raw = _compute_bsc_progress(actual_value, target_value, direction)
+            if progress_raw is not None and not np.isfinite(progress_raw):
+                progress_raw = None
+
+            formatted_target = _format_bsc_number(metric_cfg, target_value, unit)
+            formatted_actual = _format_bsc_number(metric_cfg, actual_value, unit)
+
+            with row_cols[0]:
+                unit_label = _bsc_unit_label(metric_cfg, unit)
+                label_text = f"**{metric_label}**"
+                if unit_label:
+                    label_text += f"（{unit_label}）"
+                st.markdown(label_text)
+                description = str(metric_cfg.get("description", ""))
+                if description:
+                    st.caption(description)
+
+                if progress_raw is None or not is_populated:
+                    st.caption("目標と実績を入力すると達成率を算出します。")
+                else:
+                    progress_display = max(progress_raw, 0.0)
+                    clamped_progress = min(progress_display, 1.0)
+                    st.progress(clamped_progress)
+                    st.caption(
+                        f"達成率 {progress_display * 100:.1f}%｜目標 {formatted_target} / 実績 {formatted_actual}"
+                    )
+
+            if progress_raw is not None and is_populated:
+                perspective_progress.append(min(max(progress_raw, 0.0), 1.2))
+                if progress_raw < 0.999:
+                    if direction == "lower":
+                        gap_value = actual_value - target_value
+                        gap_prefix = "超過"
+                    else:
+                        gap_value = target_value - actual_value
+                        gap_prefix = "不足"
+                    gap_text = f"{gap_prefix} {_format_bsc_number(metric_cfg, abs(gap_value), unit)}"
+                    improvement_entries.append(
+                        {
+                            "perspective": perspective_label,
+                            "metric": metric_label,
+                            "progress_pct": max(progress_raw, 0.0) * 100,
+                            "target_text": formatted_target,
+                            "actual_text": formatted_actual,
+                            "gap_text": gap_text,
+                            "suggestions": BSC_SUGGESTION_LIBRARY.get(metric_key, []),
+                        }
+                    )
+
+        bsc_state[perspective_key] = metrics_state
+        if perspective_progress:
+            average_progress = sum(perspective_progress) / len(perspective_progress)
+        else:
+            average_progress = None
+        perspective_results.append(
+            {
+                "label": perspective_label,
+                "score": average_progress,
+            }
+        )
+
+    st.session_state[BSC_STATE_KEY] = bsc_state
+
+    if perspective_results:
+        score_cols = st.columns(len(perspective_results))
+        for col, result in zip(score_cols, perspective_results):
+            score_value = result.get("score")
+            if score_value is None:
+                col.metric(result.get("label", ""), "—")
+            else:
+                display_score = max(0.0, min(score_value, 1.2)) * 100
+                col.metric(result.get("label", ""), f"{display_score:.1f}%")
+
+    valid_scores = [res.get("score") for res in perspective_results if res.get("score") is not None]
+    has_valid_scores = bool(valid_scores)
+    if has_input and has_valid_scores:
+        radar_theta = [res.get("label", "") for res in perspective_results]
+        radar_scores = [
+            max(0.0, min(res.get("score", 0.0) or 0.0, 1.2)) for res in perspective_results
+        ]
+        radar_fig = go.Figure(
+            data=[
+                go.Scatterpolar(
+                    r=radar_scores,
+                    theta=radar_theta,
+                    fill="toself",
+                    name="達成率",
+                    line=dict(color=palette[0]),
+                    marker=dict(color=palette[0]),
+                )
+            ]
+        )
+        radar_fig.update_layout(
+            template="plotly_white",
+            polar=dict(
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 1.2],
+                    tickvals=[0.0, 0.5, 1.0, 1.2],
+                    ticktext=["0%", "50%", "100%", "120%"],
+                )
+            ),
+            showlegend=False,
+        )
+        st.plotly_chart(
+            radar_fig,
+            use_container_width=True,
+            config=plotly_download_config("balanced_scorecard"),
+        )
+        st.caption("レーダーチャートは各視点の平均達成率を0〜120%スケールで表示します。")
+    elif not has_input:
+        st.info("各指標の目標値と実績値を入力すると、達成度と改善示唆がここに表示されます。")
+
+    if has_input:
+        if improvement_entries:
+            st.markdown("#### KPI未達の原因仮説と改善施策")
+            lines: List[str] = []
+            for entry in improvement_entries:
+                lines.append(
+                    "- **{perspective}｜{metric}**: 達成率 {progress:.1f}% （目標 {target} / 実績 {actual}｜{gap})".format(
+                        perspective=entry["perspective"],
+                        metric=entry["metric"],
+                        progress=entry["progress_pct"],
+                        target=entry["target_text"],
+                        actual=entry["actual_text"],
+                        gap=entry["gap_text"],
+                    )
+                )
+                for suggestion in entry.get("suggestions", []):
+                    lines.append(
+                        f"    - 原因例: {suggestion.get('cause', '')}｜改善策: {suggestion.get('action', '')}"
+                    )
+            st.markdown("\n".join(lines))
+        elif has_valid_scores:
+            st.success("入力された指標はすべて目標を達成しています。次の打ち手を検討しましょう。")
+        else:
+            st.info("目標値が未入力の指標があります。目標と実績を設定すると達成度と改善策を算出できます。")
 
     st.caption(
         f"運転資本想定: 売掛 {bs_metrics.get('receivable_days', Decimal('0'))}日 / "
