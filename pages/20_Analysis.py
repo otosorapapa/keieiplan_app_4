@@ -146,34 +146,23 @@ def build_cost_composition(amounts_data: Dict[str, str]) -> pd.DataFrame:
 
 def _monthly_capex_schedule(capex: CapexPlan) -> Dict[int, Decimal]:
     schedule = {month: Decimal("0") for month in range(1, 13)}
-    for item in capex.items:
-        month = int(getattr(item, "start_month", 1))
-        month = max(1, min(12, month))
-        schedule[month] += Decimal(item.amount)
+    for entry in capex.payment_schedule():
+        if entry.absolute_month <= 12:
+            schedule[entry.absolute_month] += entry.amount
     return schedule
 
 
-def _monthly_interest_schedule(loans: LoanSchedule) -> Dict[int, Decimal]:
-    schedule = {month: Decimal("0") for month in range(1, 13)}
-    for loan in loans.loans:
-        principal = Decimal(loan.principal)
-        rate = Decimal(loan.interest_rate)
-        term_months = int(loan.term_months)
-        start_month = int(loan.start_month)
-        outstanding = principal
-        for offset in range(term_months):
-            month_index = start_month + offset
-            interest = outstanding * rate / Decimal("12")
-            if 1 <= month_index <= 12:
-                schedule[month_index] += interest
-            if loan.repayment_type == "equal_principal":
-                principal_payment = principal / Decimal(term_months)
-            else:
-                principal_payment = principal if offset == term_months - 1 else Decimal("0")
-            principal_payment = min(principal_payment, outstanding)
-            outstanding = max(Decimal("0"), outstanding - principal_payment)
-            if month_index >= 12:
-                break
+def _monthly_debt_schedule(loans: LoanSchedule) -> Dict[int, Dict[str, Decimal]]:
+    schedule: Dict[int, Dict[str, Decimal]] = {}
+    for entry in loans.amortization_schedule():
+        if entry.absolute_month > 12:
+            continue
+        month_entry = schedule.setdefault(
+            entry.absolute_month,
+            {"interest": Decimal("0"), "principal": Decimal("0")},
+        )
+        month_entry["interest"] += entry.interest
+        month_entry["principal"] += entry.principal
     return schedule
 
 
@@ -260,45 +249,31 @@ def build_dscr_timeseries(
     operating_cf = _to_decimal(operating_cf_value)
     if operating_cf < 0:
         operating_cf = Decimal("0")
-    records: List[Dict[str, object]] = []
-    for loan in loans_data.get("loans", []):
-        principal = _to_decimal(loan.get("principal", "0"))
-        rate = _to_decimal(loan.get("interest_rate", "0"))
-        term_months = int(loan.get("term_months", 0))
-        start_month = int(loan.get("start_month", 1))
-        repayment_type = str(loan.get("repayment_type", "equal_principal"))
-        if term_months <= 0 or principal <= 0:
-            continue
-        outstanding = principal
-        for offset in range(term_months):
-            month_index = start_month + offset
-            year_index = (month_index - 1) // 12 + 1
-            interest = outstanding * rate / Decimal("12")
-            if repayment_type == "equal_principal":
-                principal_payment = principal / Decimal(term_months)
-            else:
-                principal_payment = principal if offset == term_months - 1 else Decimal("0")
-            principal_payment = min(principal_payment, outstanding)
-            ending = outstanding - principal_payment
-            records.append(
-                {
-                    "year": year_index,
-                    "interest": interest,
-                    "principal": principal_payment,
-                    "out_start": outstanding,
-                    "out_end": ending,
-                }
-            )
-            outstanding = ending
-
-    if not records:
+    try:
+        schedule_model = LoanSchedule(**loans_data)
+    except Exception:
         return pd.DataFrame()
 
+    entries = schedule_model.amortization_schedule()
+    if not entries:
+        return pd.DataFrame()
+
+    aggregated: Dict[int, Dict[str, Decimal]] = {}
+    for entry in entries:
+        data = aggregated.setdefault(
+            int(entry.year),
+            {"interest": Decimal("0"), "principal": Decimal("0"), "out_start": None},
+        )
+        data["interest"] += entry.interest
+        data["principal"] += entry.principal
+        if data["out_start"] is None:
+            data["out_start"] = entry.balance + entry.principal
+
     grouped_rows: List[Dict[str, float]] = []
-    for year, group in pd.DataFrame(records).groupby("year"):
-        interest_total = sum(group["interest"], start=Decimal("0"))
-        principal_total = sum(group["principal"], start=Decimal("0"))
-        outstanding_start = group["out_start"].iloc[0]
+    for year, values in sorted(aggregated.items()):
+        interest_total = values["interest"]
+        principal_total = values["principal"]
+        outstanding_start = values["out_start"] or Decimal("0")
         debt_service = interest_total + principal_total
         dscr = operating_cf / debt_service if debt_service > 0 else Decimal("NaN")
         payback_years = (
@@ -356,7 +331,9 @@ bs_data = generate_balance_sheet(
 cf_data = generate_cash_flow(amounts, bundle.capex, bundle.loans, bundle.tax)
 sales_summary = bundle.sales.assumption_summary()
 capex_schedule = _monthly_capex_schedule(bundle.capex)
-interest_schedule = _monthly_interest_schedule(bundle.loans)
+debt_schedule = _monthly_debt_schedule(bundle.loans)
+principal_schedule = {month: values["principal"] for month, values in debt_schedule.items()}
+interest_schedule = {month: values["interest"] for month, values in debt_schedule.items()}
 plan_sales_total = Decimal(amounts.get("REV", Decimal("0")))
 sales_range_min = Decimal(sales_summary.get("range_min_total", Decimal("0")))
 sales_range_typical = Decimal(sales_summary.get("range_typical_total", Decimal("0")))
@@ -406,8 +383,12 @@ non_operating_expense_total = sum(
     (Decimal(amounts.get(code, Decimal("0"))) for code in ["NOE_INT", "NOE_OTH"]),
     start=Decimal("0"),
 )
+interest_expense_total = Decimal(amounts.get("NOE_INT", Decimal("0")))
+other_non_operating_expense_total = non_operating_expense_total - interest_expense_total
 monthly_noi = non_operating_income_total / Decimal("12") if non_operating_income_total else Decimal("0")
-monthly_noe = non_operating_expense_total / Decimal("12") if non_operating_expense_total else Decimal("0")
+monthly_other_noe = (
+    other_non_operating_expense_total / Decimal("12") if other_non_operating_expense_total else Decimal("0")
+)
 tax_rate = Decimal(bundle.tax.corporate_tax_rate)
 
 monthly_cf_entries: List[Dict[str, Decimal]] = []
@@ -415,11 +396,13 @@ running_cash = Decimal("0")
 for idx, row in monthly_pl_df.iterrows():
     month_index = idx + 1
     operating_profit = Decimal(str(row["営業利益"]))
+    interest_month = interest_schedule.get(month_index, Decimal("0"))
+    monthly_noe = monthly_other_noe + interest_month
     ordinary_income_month = operating_profit + monthly_noi - monthly_noe
     taxes_month = ordinary_income_month * tax_rate if ordinary_income_month > 0 else Decimal("0")
     operating_cf_month = ordinary_income_month + monthly_depreciation - taxes_month
     investing_cf_month = -capex_schedule.get(month_index, Decimal("0"))
-    financing_cf_month = -interest_schedule.get(month_index, Decimal("0"))
+    financing_cf_month = -principal_schedule.get(month_index, Decimal("0"))
     net_cf_month = operating_cf_month + investing_cf_month + financing_cf_month
     running_cash += net_cf_month
     monthly_cf_entries.append(
@@ -961,11 +944,127 @@ with kpi_tab:
         yaxis_title='金額 (円)',
         yaxis_tickformat=',',
     )
-    st.plotly_chart(
-        fcf_fig,
-        use_container_width=True,
-        config=plotly_download_config('fcf_waterfall'),
+st.plotly_chart(
+    fcf_fig,
+    use_container_width=True,
+    config=plotly_download_config('fcf_waterfall'),
+)
+
+investment_metrics = cf_data.get("investment_metrics", {})
+if isinstance(investment_metrics, dict) and investment_metrics.get("monthly_cash_flows"):
+    st.markdown('### 投資評価指標')
+    payback_years_value = investment_metrics.get("payback_period_years")
+    npv_value = Decimal(str(investment_metrics.get("npv", Decimal("0"))))
+    discount_rate_value = Decimal(
+        str(investment_metrics.get("discount_rate", Decimal("0")))
     )
+
+    metric_cols = st.columns(3)
+    with metric_cols[0]:
+        if payback_years_value is None:
+            payback_text = "—"
+        else:
+            payback_decimal = Decimal(str(payback_years_value))
+            payback_text = f"{float(payback_decimal):.1f}年"
+        st.metric("投資回収期間", payback_text)
+    with metric_cols[1]:
+        st.metric("NPV (現在価値)", format_amount_with_unit(npv_value, "円"))
+    with metric_cols[2]:
+        st.metric("割引率", f"{float(discount_rate_value) * 100:.1f}%")
+
+    with st.expander("月次キャッシュフロー予測", expanded=False):
+        projection_rows = []
+        for entry in investment_metrics.get("monthly_cash_flows", []):
+            projection_rows.append(
+                {
+                    "月": f"FY{int(entry['year'])} 月{int(entry['month']):02d}",
+                    "営業CF(利払前)": float(entry["operating"]),
+                    "投資CF": float(entry["investing"]),
+                    "財務CF": float(entry["financing"]),
+                    "ネット": float(entry["net"]),
+                    "累計": float(entry["cumulative"]),
+                }
+            )
+        projection_df = pd.DataFrame(projection_rows)
+        st.dataframe(
+            projection_df,
+            hide_index=True,
+            **use_container_width_kwargs(st.dataframe),
+        )
+
+capex_schedule_data = cf_data.get("capex_schedule", [])
+loan_schedule_data = cf_data.get("loan_schedule", [])
+if capex_schedule_data or loan_schedule_data:
+    st.markdown('### 投資・借入スケジュール')
+    schedule_cols = st.columns(2)
+    with schedule_cols[0]:
+        st.markdown('#### 設備投資支払')
+        if capex_schedule_data:
+            capex_rows = [
+                {
+                    '投資名': entry.get('name', ''),
+                    '時期': f"FY{int(entry.get('year', 1))} 月{int(entry.get('month', 1)):02d}",
+                    '支払額': format_amount_with_unit(Decimal(str(entry.get('amount', 0))), '円'),
+                }
+                for entry in capex_schedule_data
+            ]
+            capex_df_display = pd.DataFrame(capex_rows)
+            st.dataframe(
+                capex_df_display,
+                hide_index=True,
+                **use_container_width_kwargs(st.dataframe),
+            )
+        else:
+            st.info('表示する設備投資スケジュールがありません。')
+    with schedule_cols[1]:
+        st.markdown('#### 借入返済（年次サマリー）')
+        if loan_schedule_data:
+            aggregated: Dict[int, Dict[str, Decimal]] = {}
+            for entry in loan_schedule_data:
+                year_key = int(entry.get('year', 1))
+                data = aggregated.setdefault(
+                    year_key,
+                    {'interest': Decimal('0'), 'principal': Decimal('0')},
+                )
+                data['interest'] += Decimal(str(entry.get('interest', 0)))
+                data['principal'] += Decimal(str(entry.get('principal', 0)))
+            summary_rows = [
+                {
+                    '年度': f"FY{year}",
+                    '利息': format_amount_with_unit(values['interest'], '円'),
+                    '元金': format_amount_with_unit(values['principal'], '円'),
+                    '返済額合計': format_amount_with_unit(
+                        values['interest'] + values['principal'], '円'
+                    ),
+                }
+                for year, values in sorted(aggregated.items())
+            ]
+            summary_df = pd.DataFrame(summary_rows)
+            st.dataframe(
+                summary_df,
+                hide_index=True,
+                **use_container_width_kwargs(st.dataframe),
+            )
+
+            with st.expander('月次内訳を見る', expanded=False):
+                monthly_rows = [
+                    {
+                        'ローン': entry.get('loan_name', ''),
+                        '時期': f"FY{int(entry.get('year', 1))} 月{int(entry.get('month', 1)):02d}",
+                        '利息': float(Decimal(str(entry.get('interest', 0)))),
+                        '元金': float(Decimal(str(entry.get('principal', 0)))),
+                        '残高': float(Decimal(str(entry.get('balance', 0)))),
+                    }
+                    for entry in loan_schedule_data
+                ]
+                loan_monthly_df = pd.DataFrame(monthly_rows)
+                st.dataframe(
+                    loan_monthly_df,
+                    hide_index=True,
+                    **use_container_width_kwargs(st.dataframe),
+                )
+        else:
+            st.info('借入返済スケジュールが未設定です。')
 
     st.markdown('### 月次キャッシュフローと累計キャッシュ')
     if not monthly_cf_df.empty:

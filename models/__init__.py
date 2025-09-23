@@ -2,10 +2,12 @@
 
 from .finance import (
     CapexItem,
+    CapexPayment,
     CapexPlan,
     CostPlan,
     FinanceBundle,
     LoanItem,
+    LoanPayment,
     LoanSchedule,
     MONTH_SEQUENCE,
     MonthlySeries,
@@ -24,9 +26,11 @@ from .industry import IndustryTemplate, IndustrySalesRow, INDUSTRY_TEMPLATES
 __all__ = [
     "CapexItem",
     "CapexPlan",
+    "CapexPayment",
     "CostPlan",
     "FinanceBundle",
     "LoanItem",
+    "LoanPayment",
     "LoanSchedule",
     "MONTH_SEQUENCE",
     "MonthlySeries",
