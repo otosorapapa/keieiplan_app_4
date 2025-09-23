@@ -21,7 +21,13 @@ from calc import (
 )
 from formatting import UNIT_FACTORS, format_amount_with_unit, format_ratio
 from state import ensure_session_defaults, load_finance_bundle
-from models import INDUSTRY_TEMPLATES, CapexPlan, LoanSchedule
+from models import (
+    INDUSTRY_TEMPLATES,
+    CapexPlan,
+    LoanSchedule,
+    TaxPolicy,
+    DEFAULT_TAX_POLICY,
+)
 from theme import COLOR_BLIND_COLORS, THEME_COLORS, inject_theme
 from ui.components import MetricCard, render_metric_cards
 from ui.streamlit_compat import use_container_width_kwargs
@@ -172,6 +178,22 @@ def _coerce_loan_schedule(value: object) -> LoanSchedule | None:
     if isinstance(value, Mapping):
         try:
             return LoanSchedule.model_validate(dict(value))
+        except (ValidationError, TypeError, ValueError):
+            return None
+    return None
+
+
+def _coerce_tax_policy(value: object) -> TaxPolicy | None:
+    if isinstance(value, TaxPolicy):
+        return value
+    if isinstance(value, BaseModel):
+        try:
+            return TaxPolicy.model_validate(value)
+        except (ValidationError, TypeError, ValueError):
+            return None
+    if isinstance(value, Mapping):
+        try:
+            return TaxPolicy.model_validate(dict(value))
         except (ValidationError, TypeError, ValueError):
             return None
     return None
@@ -345,6 +367,9 @@ fiscal_year = int(settings_state.get("fiscal_year", 2025))
 unit_factor = UNIT_FACTORS.get(unit, Decimal("1"))
 
 bundle, has_custom_inputs = load_finance_bundle()
+tax_policy = _coerce_tax_policy(bundle.tax)
+if tax_policy is None:
+    tax_policy = DEFAULT_TAX_POLICY.model_copy(deep=True)
 if not has_custom_inputs:
     st.info("Inputsページでデータを保存すると、分析結果が更新されます。以下は既定値サンプルです。")
 
@@ -353,7 +378,7 @@ plan_cfg = plan_from_models(
     bundle.costs,
     bundle.capex,
     bundle.loans,
-    bundle.tax,
+    tax_policy,
     fte=fte,
     unit=unit,
 )
@@ -366,10 +391,10 @@ bs_data = generate_balance_sheet(
     amounts,
     bundle.capex,
     bundle.loans,
-    bundle.tax,
+    tax_policy,
     working_capital=working_capital_profile,
 )
-cf_data = generate_cash_flow(amounts, bundle.capex, bundle.loans, bundle.tax)
+cf_data = generate_cash_flow(amounts, bundle.capex, bundle.loans, tax_policy)
 sales_summary = bundle.sales.assumption_summary()
 capex_schedule = _monthly_capex_schedule(bundle.capex)
 debt_schedule = _monthly_debt_schedule(bundle.loans)
@@ -396,7 +421,7 @@ sales_dump = bundle.sales.model_dump(mode="json")
 amounts_serialized = {code: str(value) for code, value in amounts.items()}
 capex_dump = bundle.capex.model_dump(mode="json")
 loans_dump = bundle.loans.model_dump(mode="json")
-tax_dump = bundle.tax.model_dump(mode="json")
+tax_dump = tax_policy.model_dump(mode="json")
 
 monthly_pl_df = build_monthly_pl_dataframe(sales_dump, plan_items_serialized, amounts_serialized)
 cost_df = build_cost_composition(amounts_serialized)
@@ -430,8 +455,6 @@ monthly_noi = non_operating_income_total / Decimal("12") if non_operating_income
 monthly_other_noe = (
     other_non_operating_expense_total / Decimal("12") if other_non_operating_expense_total else Decimal("0")
 )
-tax_policy = bundle.tax
-
 monthly_cf_entries: List[Dict[str, Decimal]] = []
 running_cash = Decimal("0")
 for idx, row in monthly_pl_df.iterrows():
