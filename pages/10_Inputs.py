@@ -129,6 +129,14 @@ BUSINESS_CONTEXT_PLACEHOLDER = {
     "qualitative_memo": "事業計画書に記載したい補足・KGI/KPIの背景",
 }
 
+CUSTOMER_EXAMPLE_TEXT = (
+    "例：主要顧客やターゲット市場の概要｜年商5〜10億円規模の製造業の経営企画部門。"
+    "紙の在庫管理からDX移行を検討しており、月次で意思決定できるダッシュボードを求めている。"
+)
+
+BUSINESS_CONTEXT_SNAPSHOT_KEY = "business_context_snapshot"
+BUSINESS_CONTEXT_LAST_SAVED_KEY = "business_context_last_saved_at"
+
 
 def _build_snapshot_payload() -> Dict[str, object]:
     """Collect the current session state into a serialisable snapshot."""
@@ -1141,6 +1149,15 @@ if BUSINESS_CONTEXT_KEY not in st.session_state:
     st.session_state[BUSINESS_CONTEXT_KEY] = BUSINESS_CONTEXT_TEMPLATE.copy()
 context_state: Dict[str, str] = st.session_state[BUSINESS_CONTEXT_KEY]
 
+if BUSINESS_CONTEXT_SNAPSHOT_KEY not in st.session_state:
+    st.session_state[BUSINESS_CONTEXT_SNAPSHOT_KEY] = {
+        key: str(context_state.get(key, "")) for key in BUSINESS_CONTEXT_TEMPLATE
+    }
+if BUSINESS_CONTEXT_LAST_SAVED_KEY not in st.session_state:
+    st.session_state[BUSINESS_CONTEXT_LAST_SAVED_KEY] = (
+        datetime.now().replace(microsecond=0).isoformat()
+    )
+
 if "capex_editor_df" not in st.session_state:
     st.session_state["capex_editor_df"] = capex_defaults_df.copy()
 if "loan_editor_df" not in st.session_state:
@@ -1214,6 +1231,17 @@ if current_step == "context":
     st.markdown("3C分析とビジネスモデルキャンバスの主要要素を整理して、数値入力の前提を明確にしましょう。")
     st.info("顧客(Customer)・自社(Company)・競合(Competitor)の視点を1〜2行でも言語化することで、収益モデルの仮定がぶれにくくなります。")
 
+    last_saved_iso = st.session_state.get(BUSINESS_CONTEXT_LAST_SAVED_KEY)
+    if last_saved_iso:
+        try:
+            saved_dt = datetime.fromisoformat(str(last_saved_iso))
+            saved_label = saved_dt.strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            saved_label = str(last_saved_iso)
+        st.caption(f"💾 入力内容は自動保存されます（最終保存: {saved_label}）")
+    else:
+        st.caption("💾 入力内容は自動保存されます。")
+
     three_c_cols = st.columns(3)
     with three_c_cols[0]:
         context_state["three_c_customer"] = st.text_area(
@@ -1223,6 +1251,7 @@ if current_step == "context":
             help="想定顧客層や顧客課題を記入してください。",
             height=150,
         )
+        st.caption(CUSTOMER_EXAMPLE_TEXT)
     with three_c_cols[1]:
         context_state["three_c_company"] = st.text_area(
             "Company（自社）",
@@ -2241,4 +2270,15 @@ elif current_step == "tax":
             )
 
 st.session_state[BUSINESS_CONTEXT_KEY] = context_state
+
+current_context_snapshot = {
+    key: str(context_state.get(key, "")) for key in BUSINESS_CONTEXT_TEMPLATE
+}
+previous_context_snapshot = st.session_state.get(BUSINESS_CONTEXT_SNAPSHOT_KEY)
+if previous_context_snapshot != current_context_snapshot:
+    st.session_state[BUSINESS_CONTEXT_SNAPSHOT_KEY] = current_context_snapshot
+    st.session_state[BUSINESS_CONTEXT_LAST_SAVED_KEY] = (
+        datetime.now().replace(microsecond=0).isoformat()
+    )
+
 _render_navigation(step_index)
