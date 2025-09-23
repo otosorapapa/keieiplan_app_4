@@ -63,6 +63,29 @@ ASSUMPTION_COLUMNS = [
     *ASSUMPTION_RANGE_COLUMNS,
     *ASSUMPTION_TEXT_COLUMNS,
 ]
+REQUIRED_TEXT_TEMPLATE_COLUMNS = ["チャネル", "商品"]
+REQUIRED_NUMERIC_TEMPLATE_COLUMNS = [*ASSUMPTION_NUMERIC_COLUMNS]
+REQUIRED_TEMPLATE_COLUMNS = [
+    *REQUIRED_TEXT_TEMPLATE_COLUMNS,
+    *REQUIRED_NUMERIC_TEMPLATE_COLUMNS,
+    *MONTH_COLUMNS,
+]
+TEMPLATE_COLUMN_GUIDE = [
+    ("チャネル", "販売経路（例：オンライン、店舗など）。"),
+    ("商品", "チャネル内の主力商品・サービス名。"),
+    ("想定顧客数", "1か月に想定する顧客数。整数または小数で入力します。"),
+    ("客単価", "税込の平均単価（円）。カンマなしの半角数値で入力します。"),
+    ("購入頻度(月)", "1か月あたりの購入回数。サブスクは1.0が基準です。"),
+    (
+        "年間売上(最低/中央値/最高)",
+        "任意入力。シナリオ比較用のレンジで、空欄は0として扱います。",
+    ),
+    (
+        f"月01〜月{MONTH_SEQUENCE[-1]:02d}",
+        "各月の売上金額（円）。未使用の月は0を入力してください。",
+    ),
+    ("メモ", "任意の補足メモ。獲得施策や前提条件を記録できます。"),
+]
 SALES_TEMPLATE_STATE_KEY = "sales_template_df"
 SALES_CHANNEL_COUNTER_KEY = "sales_channel_counter"
 SALES_PRODUCT_COUNTER_KEY = "sales_product_counter"
@@ -714,6 +737,85 @@ def _ensure_sales_template_state(base_df: pd.DataFrame) -> None:
         st.session_state[SALES_PRODUCT_COUNTER_KEY] = len(unique_products) + 1
 
 
+def _template_preview_dataframe() -> pd.DataFrame:
+    monthly_preview = {
+        f"月{month:02d}": float(120000 + ((month - 1) % 3) * 20000)
+        for month in MONTH_SEQUENCE
+    }
+    preview_row = {
+        "チャネル": "オンライン",
+        "商品": "主力商品A",
+        "想定顧客数": 120,
+        "客単価": 8000,
+        "購入頻度(月)": 1.2,
+        "年間売上(最低)": 1200000,
+        "年間売上(中央値)": 1440000,
+        "年間売上(最高)": 1680000,
+        "メモ": "広告経由の継続顧客を想定",
+        **monthly_preview,
+    }
+    ordered_columns = ["チャネル", "商品", *ASSUMPTION_COLUMNS, *MONTH_COLUMNS]
+    return pd.DataFrame([preview_row], columns=ordered_columns)
+
+
+def _format_row_label(index: int) -> str:
+    return f"{index + 2}行目"
+
+
+def _validate_sales_template(df: pd.DataFrame) -> List[str]:
+    issues: List[str] = []
+    if df is None:
+        return ["ファイルの内容を読み取れませんでした。もう一度アップロードしてください。"]
+
+    working = df.copy()
+    working.columns = [str(col).strip() for col in working.columns]
+
+    missing_columns = [col for col in REQUIRED_TEMPLATE_COLUMNS if col not in working.columns]
+    if missing_columns:
+        joined = "、".join(missing_columns)
+        issues.append(
+            f"必須列（{joined}）が見つかりません。ダウンロードしたテンプレートと同じ列構成にしてください。"
+        )
+        return issues
+
+    if working.empty:
+        issues.append("データ行がありません。1行以上のチャネル×商品行を入力してください。")
+        return issues
+
+    missing_tokens = {"", "nan", "none", "nat", "na", "<na>"}
+
+    for column in REQUIRED_TEXT_TEMPLATE_COLUMNS:
+        series = working[column]
+        text_series = series.astype(str).str.strip()
+        lower_series = text_series.str.lower()
+        missing_mask = lower_series.isin(missing_tokens)
+        for idx in working.index[missing_mask]:
+            issues.append(f"{_format_row_label(idx)}『{column}』が未入力です。値を入力してください。")
+
+    numeric_columns = [
+        column
+        for column in [*ASSUMPTION_NUMERIC_COLUMNS, *ASSUMPTION_RANGE_COLUMNS, *MONTH_COLUMNS]
+        if column in working.columns
+    ]
+
+    for column in numeric_columns:
+        series = working[column]
+        text_series = series.astype(str).str.strip()
+        lower_series = text_series.str.lower()
+        missing_mask = lower_series.isin(missing_tokens)
+        converted = pd.to_numeric(series, errors="coerce")
+        invalid_mask = converted.isna() & ~missing_mask
+        for idx in working.index[invalid_mask]:
+            issues.append(
+                f"{_format_row_label(idx)}『{column}』は数値で入力してください（現在の値: {text_series.iloc[idx]}）。"
+            )
+        if column in REQUIRED_NUMERIC_TEMPLATE_COLUMNS:
+            for idx in working.index[missing_mask]:
+                issues.append(f"{_format_row_label(idx)}『{column}』が未入力です。0以上の数値を入力してください。")
+
+    return issues
+
+
 def _standardize_sales_df(df: pd.DataFrame) -> pd.DataFrame:
     base = df.copy()
     base.columns = [str(col).strip() for col in base.columns]
@@ -784,6 +886,11 @@ def _load_sales_template_from_upload(upload: io.BytesIO | None) -> pd.DataFrame 
             df = pd.read_excel(upload)
     except Exception:
         st.error("ファイルの読み込みに失敗しました。書式を確認してください。")
+        return None
+    issues = _validate_sales_template(df)
+    if issues:
+        for issue in issues:
+            st.error(issue)
         return None
     try:
         return _standardize_sales_df(df)
@@ -1474,78 +1581,105 @@ elif current_step == "sales":
             )
             for month in MONTH_COLUMNS
         }
-        download_cols = st.columns(2)
-        with download_cols[0]:
-            st.download_button(
-                "CSVテンプレートDL",
-                data=_sales_template_to_csv(sales_df),
-                file_name="sales_template.csv",
-                mime="text/csv",
-                **use_container_width_kwargs(st.download_button),
+        guidance_col, preview_col = st.columns([2.6, 1.4], gap="large")
+        with guidance_col:
+            st.markdown("##### テンプレートの使い方")
+            st.markdown(
+                "\n".join(
+                    f"- **{column}**：{description}"
+                    for column, description in TEMPLATE_COLUMN_GUIDE
+                )
             )
-        with download_cols[1]:
-            st.download_button(
-                "ExcelテンプレートDL",
-                data=_sales_template_to_excel(sales_df),
-                file_name="sales_template.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                **use_container_width_kwargs(st.download_button),
-            )
-        with st.form("sales_template_form"):
-            uploaded_template = st.file_uploader(
-                "テンプレートをアップロード (最大5MB)",
-                type=["csv", "xlsx"],
-                accept_multiple_files=False,
-                help="ダウンロードしたテンプレートと同じ列構成でアップロードしてください。",
-            )
-            edited_df = st.data_editor(
-                sales_df,
-                num_rows="dynamic",
-                **use_container_width_kwargs(st.data_editor),
+            st.caption("※ CSV/Excelでダウンロードしたテンプレートを編集し、そのままアップロードできます。")
+            st.caption("※ アップロード時に必須列の欠損と数値形式を自動チェックします。")
+            download_cols = st.columns(2)
+            with download_cols[0]:
+                st.download_button(
+                    "CSVテンプレートDL",
+                    data=_sales_template_to_csv(sales_df),
+                    file_name="sales_template.csv",
+                    mime="text/csv",
+                    **use_container_width_kwargs(st.download_button),
+                )
+            with download_cols[1]:
+                st.download_button(
+                    "ExcelテンプレートDL",
+                    data=_sales_template_to_excel(sales_df),
+                    file_name="sales_template.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    **use_container_width_kwargs(st.download_button),
+                )
+            with st.form("sales_template_form"):
+                uploaded_template = st.file_uploader(
+                    "テンプレートをアップロード (最大5MB)",
+                    type=["csv", "xlsx"],
+                    accept_multiple_files=False,
+                    help="ダウンロードしたテンプレートと同じ列構成でアップロードしてください。",
+                )
+                edited_df = st.data_editor(
+                    sales_df,
+                    num_rows="dynamic",
+                    **use_container_width_kwargs(st.data_editor),
+                    hide_index=True,
+                    column_config={
+                        "チャネル": st.column_config.TextColumn(
+                            "チャネル", max_chars=40, help="販売経路（例：自社EC、店舗など）"
+                        ),
+                        "商品": st.column_config.TextColumn(
+                            "商品", max_chars=40, help="商品・サービス名を入力します。"
+                        ),
+                        "想定顧客数": st.column_config.NumberColumn(
+                            "想定顧客数", min_value=0.0, step=1.0, format="%d", help="月間で想定する顧客数。Fermi推定の起点となります。"
+                        ),
+                        "客単価": st.column_config.NumberColumn(
+                            "客単価", min_value=0.0, step=100.0, format="¥%d", help="平均客単価。販促シナリオの前提になります。"
+                        ),
+                        "購入頻度(月)": st.column_config.NumberColumn(
+                            "購入頻度(月)",
+                            min_value=0.0,
+                            step=0.1,
+                            format="%.1f",
+                            help="1ヶ月あたりの購入・利用回数。サブスクの場合は1.0を基準にします。",
+                        ),
+                        "メモ": st.column_config.TextColumn(
+                            "メモ", max_chars=80, help="チャネル戦略や前提条件を記録します。"
+                        ),
+                        **month_columns_config,
+                    },
+                    key="sales_editor",
+                )
+                submit_kwargs = use_container_width_kwargs(st.form_submit_button)
+                if st.form_submit_button("テンプレートを反映", **submit_kwargs):
+                    try:
+                        with st.spinner("テンプレートを反映しています..."):
+                            if uploaded_template is not None:
+                                loaded_df = _load_sales_template_from_upload(uploaded_template)
+                                if loaded_df is not None:
+                                    st.session_state[SALES_TEMPLATE_STATE_KEY] = loaded_df
+                                    st.success("アップロードしたテンプレートを適用しました。")
+                            else:
+                                edited_frame = pd.DataFrame(edited_df)
+                                issues = _validate_sales_template(edited_frame)
+                                if issues:
+                                    for issue in issues:
+                                        st.error(issue)
+                                else:
+                                    st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(
+                                        edited_frame
+                                    )
+                                    st.success("エディタの内容をテンプレートに反映しました。")
+                    except Exception:
+                        st.error(
+                            "テンプレートの反映に失敗しました。列構成や数値を確認し、",
+                            "解決しない場合は support@keieiplan.jp までお問い合わせください。",
+                        )
+        with preview_col:
+            st.caption("テンプレートサンプル（1行のイメージ）")
+            st.dataframe(
+                _template_preview_dataframe(),
                 hide_index=True,
-                column_config={
-                    "チャネル": st.column_config.TextColumn("チャネル", max_chars=40, help="販売経路（例：自社EC、店舗など）"),
-                    "商品": st.column_config.TextColumn("商品", max_chars=40, help="商品・サービス名を入力します。"),
-                    "想定顧客数": st.column_config.NumberColumn(
-                        "想定顧客数", min_value=0.0, step=1.0, format="%d", help="月間で想定する顧客数。Fermi推定の起点となります。"
-                    ),
-                    "客単価": st.column_config.NumberColumn(
-                        "客単価", min_value=0.0, step=100.0, format="¥%d", help="平均客単価。販促シナリオの前提になります。"
-                    ),
-                    "購入頻度(月)": st.column_config.NumberColumn(
-                        "購入頻度(月)",
-                        min_value=0.0,
-                        step=0.1,
-                        format="%.1f",
-                        help="1ヶ月あたりの購入・利用回数。サブスクの場合は1.0を基準にします。",
-                    ),
-                    "メモ": st.column_config.TextColumn(
-                        "メモ", max_chars=80, help="チャネル戦略や前提条件を記録します。"
-                    ),
-                    **month_columns_config,
-                },
-                key="sales_editor",
+                **use_container_width_kwargs(st.dataframe),
             )
-            submit_kwargs = use_container_width_kwargs(st.form_submit_button)
-            if st.form_submit_button("テンプレートを反映", **submit_kwargs):
-                try:
-                    with st.spinner("テンプレートを反映しています..."):
-                        if uploaded_template is not None:
-                            loaded_df = _load_sales_template_from_upload(uploaded_template)
-                            if loaded_df is not None:
-                                st.session_state[SALES_TEMPLATE_STATE_KEY] = loaded_df
-                                st.success("アップロードしたテンプレートを適用しました。")
-                        else:
-                            st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(
-                                pd.DataFrame(edited_df)
-                            )
-                            st.success("エディタの内容をテンプレートに反映しました。")
-                except Exception:
-                    st.error(
-                        "テンプレートの反映に失敗しました。列構成や数値を確認し、"
-                        "解決しない場合は support@keieiplan.jp までお問い合わせください。"
-                    )
-
         sales_df = st.session_state[SALES_TEMPLATE_STATE_KEY]
         with st.expander("外部データ連携・インポート", expanded=False):
             st.markdown(
