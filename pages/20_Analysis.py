@@ -1164,7 +1164,7 @@ def build_dscr_timeseries(
 
 st.set_page_config(
     page_title="経営計画スタジオ｜Analysis",
-    page_icon="📈",
+    page_icon="▥",
     layout="wide",
 )
 
@@ -1356,7 +1356,7 @@ for idx, row in monthly_pl_df.iterrows():
 
 monthly_bs_df = pd.DataFrame(monthly_bs_rows)
 
-st.title("📈 KPI・損益分析")
+st.title("KPI・損益分析")
 st.caption(f"FY{fiscal_year} / 表示単位: {unit} / FTE: {fte}")
 
 kpi_tab, be_tab, cash_tab, trend_tab, strategy_tab = st.tabs(
@@ -1390,14 +1390,14 @@ with kpi_tab:
             "label": "売上高",
             "value": Decimal(amounts.get("REV", Decimal("0"))),
             "formatter": _amount_formatter,
-            "icon": "💴",
+            "icon": "売",
             "description": "年度売上の合計値",
         },
         "gross": {
             "label": "粗利",
             "value": Decimal(amounts.get("GROSS", Decimal("0"))),
             "formatter": _amount_formatter,
-            "icon": "🧮",
+            "icon": "粗",
             "description": "売上から原価を差し引いた利益",
             "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
@@ -1405,7 +1405,7 @@ with kpi_tab:
             "label": "営業利益",
             "value": Decimal(amounts.get("OP", Decimal("0"))),
             "formatter": _amount_formatter,
-            "icon": "🏭",
+            "icon": "営",
             "description": "本業による利益水準",
             "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
@@ -1413,7 +1413,7 @@ with kpi_tab:
             "label": "経常利益",
             "value": Decimal(amounts.get("ORD", Decimal("0"))),
             "formatter": _amount_formatter,
-            "icon": "📊",
+            "icon": "常",
             "description": "営業外収支を含む利益",
             "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
@@ -1421,7 +1421,7 @@ with kpi_tab:
             "label": "営業キャッシュフロー",
             "value": Decimal(cf_data.get("営業キャッシュフロー", Decimal("0"))),
             "formatter": _amount_formatter,
-            "icon": "💡",
+            "icon": "現",
             "description": "営業活動で得たキャッシュ",
             "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
@@ -1429,7 +1429,7 @@ with kpi_tab:
             "label": "フリーCF",
             "value": Decimal(cf_data.get("キャッシュ増減", Decimal("0"))),
             "formatter": _amount_formatter,
-            "icon": "🪙",
+            "icon": "余",
             "description": "投資・財務CF後に残る現金",
             "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
@@ -1437,7 +1437,7 @@ with kpi_tab:
             "label": "税引後利益",
             "value": Decimal(cf_data.get("税引後利益", Decimal("0"))),
             "formatter": _amount_formatter,
-            "icon": "✅",
+            "icon": "純",
             "description": "法人税控除後の純利益",
             "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
@@ -1445,7 +1445,7 @@ with kpi_tab:
             "label": "期末現金残高",
             "value": Decimal(cash_total),
             "formatter": _amount_formatter,
-            "icon": "💰",
+            "icon": "資",
             "description": "貸借対照表上の現金・預金残高",
             "tone_fn": lambda v: "negative" if v < Decimal("0") else "positive" if v > Decimal("0") else "neutral",
         },
@@ -1453,7 +1453,7 @@ with kpi_tab:
             "label": "自己資本比率",
             "value": Decimal(bs_metrics.get("equity_ratio", Decimal("NaN"))),
             "formatter": format_ratio,
-            "icon": "🛡️",
+            "icon": "盾",
             "description": "総資産に対する自己資本の割合",
             "tone_fn": lambda v: _tone_threshold(v, positive=Decimal("0.4"), caution=Decimal("0.2")),
         },
@@ -1461,7 +1461,7 @@ with kpi_tab:
             "label": "ROE",
             "value": Decimal(bs_metrics.get("roe", Decimal("NaN"))),
             "formatter": format_ratio,
-            "icon": "📐",
+            "icon": "益",
             "description": "自己資本に対する利益率",
             "tone_fn": lambda v: _tone_threshold(v, positive=Decimal("0.1"), caution=Decimal("0.0")),
         },
@@ -1469,28 +1469,28 @@ with kpi_tab:
             "label": "ネット運転資本",
             "value": Decimal(bs_metrics.get("working_capital", Decimal("0"))),
             "formatter": _yen_formatter,
-            "icon": "🔄",
+            "icon": "循",
             "description": "売掛金・棚卸資産と買掛金の差分",
         },
         "customer_count": {
             "label": "年間想定顧客数",
             "value": Decimal(sales_summary.get("total_customers", Decimal("0"))),
             "formatter": _count_formatter,
-            "icon": "🙋",
+            "icon": "顧",
             "description": "年間に購買する顧客数の見込み",
         },
         "avg_unit_price": {
             "label": "平均客単価",
             "value": Decimal(sales_summary.get("avg_unit_price", Decimal("0"))),
             "formatter": _yen_formatter,
-            "icon": "🏷️",
+            "icon": "単",
             "description": "取引1件当たりの平均売上",
         },
         "avg_frequency": {
             "label": "平均購入頻度/月",
             "value": Decimal(sales_summary.get("avg_frequency", Decimal("0"))),
             "formatter": _frequency_formatter,
-            "icon": "🔁",
+            "icon": "頻",
             "description": "顧客1人当たりの月間購買頻度",
         },
     }
@@ -1538,7 +1538,7 @@ with kpi_tab:
         )
         cards.append(
             MetricCard(
-                icon=str(cfg.get("icon", "📊")),
+                icon=str(cfg.get("icon", "指")),
                 label=str(cfg.get("label")),
                 value=str(formatted_value),
                 description=descriptor,
@@ -1808,7 +1808,7 @@ with kpi_tab:
 
     financial_cards = [
         MetricCard(
-            icon="📊",
+            icon="粗",
             label="粗利率",
             value=format_ratio(metrics.get("gross_margin")),
             description="粗利÷売上",
@@ -1817,7 +1817,7 @@ with kpi_tab:
             assistive_text="粗利率のカード。粗利÷売上で収益性を確認できます。",
         ),
         MetricCard(
-            icon="💼",
+            icon="営",
             label="営業利益率",
             value=format_ratio(metrics.get("op_margin")),
             description="営業利益÷売上",
@@ -1826,7 +1826,7 @@ with kpi_tab:
             assistive_text="営業利益率のカード。販管費や投資負担を踏まえた収益性を示します。",
         ),
         MetricCard(
-            icon="📈",
+            icon="常",
             label="経常利益率",
             value=format_ratio(metrics.get("ord_margin")),
             description="経常利益÷売上",
@@ -1835,7 +1835,7 @@ with kpi_tab:
             assistive_text="経常利益率のカード。金融収支を含む最終的な収益力を示します。",
         ),
         MetricCard(
-            icon="🛡️",
+            icon="盾",
             label="自己資本比率",
             value=format_ratio(bs_metrics.get("equity_ratio", Decimal("NaN"))),
             description="総資産に対する自己資本",
@@ -1848,7 +1848,7 @@ with kpi_tab:
             assistive_text="自己資本比率のカード。財務の安定性を示し、40%超で健全域です。",
         ),
         MetricCard(
-            icon="🎯",
+            icon="益",
             label="ROE",
             value=format_ratio(bs_metrics.get("roe", Decimal("NaN"))),
             description="自己資本利益率",

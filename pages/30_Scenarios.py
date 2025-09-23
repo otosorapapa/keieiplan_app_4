@@ -20,7 +20,7 @@ from ui.streamlit_compat import use_container_width_kwargs
 
 st.set_page_config(
     page_title="経営計画スタジオ｜Scenarios",
-    page_icon="🧮",
+    page_icon="∑",
     layout="wide",
 )
 
@@ -612,7 +612,7 @@ plan_cfg = plan_from_models(
     unit=unit,
 )
 
-st.title("🧮 シナリオ / 感度分析")
+st.title("シナリオ / 感度分析")
 
 scenario_tab, sensitivity_tab = st.tabs(["シナリオ比較", "感度・リスク分析"])
 
@@ -1110,7 +1110,7 @@ with sensitivity_tab:
         {key: value.copy() for key, value in DEFAULT_MC_CONFIG.items()},
     )
 
-    with st.expander("🎲 ランダム試行設定", expanded=False):
+    with st.expander("試行設定", expanded=False):
         st.caption("乱数分布と平均・標準偏差（％）を設定できます。")
         config_updates: Dict[str, Dict[str, float | str]] = {}
         for driver_key, driver_label in DRIVER_LABELS.items():
@@ -1161,7 +1161,7 @@ with sensitivity_tab:
             format_func=lambda x: METRIC_LABELS[x],
             key="mc_metric",
         )
-        run_button = st.button("🎯 モンテカルロを実行", key="mc_run_button")
+        run_button = st.button("モンテカルロを実行", key="mc_run_button")
 
     distribution_payload: Dict[str, Dict[str, float | str]] = {}
     current_mc_cfg = st.session_state.get("scenario_mc_config", {})

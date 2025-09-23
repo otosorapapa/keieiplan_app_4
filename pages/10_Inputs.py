@@ -49,7 +49,7 @@ from ui.fermi import FERMI_SEASONAL_PATTERNS, compute_fermi_estimate
 
 st.set_page_config(
     page_title="経営計画スタジオ｜Inputs",
-    page_icon="🧾",
+    page_icon="✎",
     layout="wide",
 )
 
@@ -736,7 +736,7 @@ def _maybe_show_tutorial(step_id: str, message: str) -> None:
         shown = set()
     if step_id in shown:
         return
-    st.toast(message, icon="💡")
+    st.toast(message, icon="✦")
     shown.add(step_id)
     st.session_state["tutorial_shown_steps"] = shown
 
@@ -856,14 +856,14 @@ def _render_fermi_wizard(sales_df: pd.DataFrame, unit: str) -> None:
     history: List[Dict[str, object]] = learning_state.get("history", [])
     expand_default = st.session_state.get("tutorial_mode", False) and not history
 
-    with st.expander("🧮 Fermi推定ウィザード", expanded=expand_default):
+    with st.expander("算 Fermi推定ウィザード", expanded=expand_default):
         st.markdown(
             "日次の来店数・客単価・営業日数を入力すると、年間売上の中央値/最低/最高レンジを推定します。"
             " 最小値・中央値・最大値で売上レンジを把握し、シナリオ比較に活用しましょう。"
             " 学習済みの実績データがあれば中央値を自動補正します。"
         )
         render_callout(
-            icon="📈",
+            icon="指",
             title="レンジ入力の目的",
             body="最小値は悲観ケース、中央値は標準ケース、最大値は成長ケースとして設定し、年間売上の幅やシナリオ分析に活用しましょう。推定結果はテンプレートの年間売上レンジにも反映できます。",
         )
@@ -1050,7 +1050,7 @@ def _render_fermi_wizard(sales_df: pd.DataFrame, unit: str) -> None:
             if st.button("推定結果をテンプレートに適用", type="primary", key="fermi_apply_button"):
                 updated_df = _apply_fermi_result(sales_df)
                 st.session_state[SALES_TEMPLATE_STATE_KEY] = updated_df
-                st.toast("Fermi推定を売上テンプレートに反映しました。", icon="✅")
+                st.toast("Fermi推定を売上テンプレートに反映しました。", icon="✔")
                 st.experimental_rerun()
 
         if history:
@@ -1476,7 +1476,7 @@ def _render_sales_guide_panel() -> None:
     st.markdown(
         """
         <div class="guide-panel" style="background-color:rgba(240,248,255,0.6);padding:1rem;border-radius:0.75rem;">
-            <h4 style="margin-top:0;">💡 入力ガイド</h4>
+            <h4 style="margin-top:0;">✦ 入力ガイド</h4>
             <ul style="padding-left:1.2rem;">
                 <li title="例示による入力イメージ">チャネル×商品×月の例：<strong>オンライン販売 10万円</strong>、<strong>店舗販売 5万円</strong>のように具体的な数字から積み上げると精度が高まります。</li>
                 <li title="売上＝客数×客単価×購入頻度">売上は <strong>客数×客単価×購入頻度</strong> に分解すると改善ポイントが見えます。</li>
@@ -1627,7 +1627,7 @@ def _apply_industry_template(template_key: str, unit_factor: Decimal) -> None:
     )
     metric_state[template_key] = template.custom_metrics
     st.session_state["industry_custom_metrics"] = metric_state
-    st.toast(f"{template.label}のテンプレートを適用しました。", icon="🧩")
+    st.toast(f"{template.label}のテンプレートを適用しました。", icon="□")
 
 
 def _capex_dataframe(data: Dict) -> pd.DataFrame:
@@ -2048,10 +2048,10 @@ completion_flags = _calculate_completion_flags(
     loan_df=loan_editor_snapshot,
 )
 
-st.title("🧾 データ入力ハブ")
+st.title("データ入力ハブ")
 st.caption("ウィザード形式で売上から投資までを順番に整理します。保存すると全ページに反映されます。")
 
-st.sidebar.title("📘 ヘルプセンター")
+st.sidebar.title("ヘルプセンター")
 with st.sidebar.expander("よくある質問 (FAQ)", expanded=False):
     st.markdown(
         """
@@ -2093,9 +2093,9 @@ if current_step == "context":
             saved_label = saved_dt.strftime("%Y-%m-%d %H:%M:%S")
         except ValueError:
             saved_label = str(last_saved_iso)
-        st.caption(f"💾 入力内容は自動保存されます（最終保存: {saved_label}）")
+        st.caption(f"保存ステータス: 入力内容は自動保存されます（最終保存: {saved_label}）")
     else:
-        st.caption("💾 入力内容は自動保存されます。")
+        st.caption("保存ステータス: 入力内容は自動保存されます。")
 
     three_c_cols = st.columns(3)
     with three_c_cols[0]:
@@ -2627,7 +2627,7 @@ elif current_step == "sales":
                 st.session_state[SALES_PRODUCT_COUNTER_KEY] = next_product_idx + 1
                 updated = pd.concat([sales_df, pd.DataFrame([new_row])], ignore_index=True)
                 st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(updated)
-                st.toast("新しいチャネル行を追加しました。", icon="➕")
+                st.toast("新しいチャネル行を追加しました。", icon="＋")
 
         channel_options = [str(ch) for ch in sales_df["チャネル"].tolist() if str(ch).strip()]
         if not channel_options:
@@ -2659,7 +2659,7 @@ elif current_step == "sales":
                 st.session_state[SALES_PRODUCT_COUNTER_KEY] = next_product_idx + 1
                 updated = pd.concat([sales_df, pd.DataFrame([new_row])], ignore_index=True)
                 st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(updated)
-                st.toast("選択したチャネルに商品行を追加しました。", icon="🆕")
+                st.toast("選択したチャネルに商品行を追加しました。", icon="新")
 
         sales_df = st.session_state[SALES_TEMPLATE_STATE_KEY]
         month_columns_config = {
@@ -2912,13 +2912,13 @@ elif current_step == "sales":
                                 ignore_index=True,
                             )
                             st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(updated)
-                            st.toast("外部データを売上テンプレートに追加しました。", icon="📥")
+                            st.toast("外部データを売上テンプレートに追加しました。", icon="収")
                         if apply_to_plan and target_metric == "固定費" and selected_fixed_code:
                             monthly_average = Decimal(str(total_amount)) / Decimal(len(MONTH_SEQUENCE))
                             st.session_state[f"fixed_cost_{selected_fixed_code}"] = float(
                                 monthly_average / (unit_factor or Decimal("1"))
                             )
-                            st.toast("固定費を実績平均で更新しました。", icon="💰")
+                            st.toast("固定費を実績平均で更新しました。", icon="資")
                         st.success("実績データを保存しました。分析ページで予実差異が表示されます。")
             elif uploaded_external is not None:
                 st.warning("読み込めるデータがありません。サンプル行を確認してください。")
@@ -3092,7 +3092,7 @@ elif current_step == "costs":
         st.info("コスト項目が0のため、粗利率チャートを描画できるデータがありません。")
 
     cost_range_state: Dict[str, Dict[str, float]] = st.session_state.get(COST_RANGE_STATE_KEY, {})
-    with st.expander("🔀 レンジ入力 (原価・費用の幅)", expanded=False):
+    with st.expander("調 レンジ入力 (原価・費用の幅)", expanded=False):
         st.caption("最小・中央値・最大の3点を入力すると、分析ページで感度レンジを参照できます。")
 
         variable_rows = []
@@ -3455,12 +3455,12 @@ elif current_step == "tax":
     metric_cols = st.columns(2)
     with metric_cols[0]:
         st.markdown(
-            f"<div class='metric-card' title='年間のチャネル×商品売上の合計額です。'>📊 <strong>売上合計</strong><br/><span style='font-size:1.4rem;'>{format_amount_with_unit(total_sales, unit)}</span></div>",
+            f"<div class='metric-card' title='年間のチャネル×商品売上の合計額です。'>¥ <strong>売上合計</strong><br/><span style='font-size:1.4rem;'>{format_amount_with_unit(total_sales, unit)}</span></div>",
             unsafe_allow_html=True,
         )
     with metric_cols[1]:
         st.markdown(
-            f"<div class='metric-card' title='粗利益率＝(売上−売上原価)÷売上。製造業では30%を超えると優良とされます。'>📊 <strong>平均原価率</strong><br/><span style='font-size:1.4rem;'>{format_ratio(avg_ratio)}</span></div>",
+            f"<div class='metric-card' title='粗利益率＝(売上−売上原価)÷売上。製造業では30%を超えると優良とされます。'>↗ <strong>平均原価率</strong><br/><span style='font-size:1.4rem;'>{format_ratio(avg_ratio)}</span></div>",
             unsafe_allow_html=True,
         )
 
@@ -3752,7 +3752,7 @@ elif current_step == "tax":
         ):
             if preview_issues:
                 st.session_state["finance_validation_errors"] = preview_issues
-                st.toast("入力にエラーがあります。赤枠の項目を修正してください。", icon="❌")
+                st.toast("入力にエラーがあります。赤枠の項目を修正してください。", icon="✖")
             else:
                 st.session_state["finance_validation_errors"] = []
                 st.session_state[SALES_TEMPLATE_STATE_KEY] = sales_df
@@ -3765,14 +3765,14 @@ elif current_step == "tax":
                         "loans": preview_bundle.loans,
                         "tax": preview_bundle.tax,
                     }
-                st.toast("財務データを保存しました。", icon="✅")
+                st.toast("財務データを保存しました。", icon="✔")
 
     st.divider()
     st.subheader("クラウド保存とバージョン管理")
 
     if not auth.is_authenticated():
         render_callout(
-            icon="🔐",
+            icon="▣",
             title="アカウントにログインするとクラウド保存できます",
             body="ヘッダー右上のログインからアカウントを作成し、計画をクラウドに保存してバージョン管理しましょう。",
             tone="caution",
@@ -3807,7 +3807,7 @@ elif current_step == "tax":
                         )
                         st.success(
                             f"{summary.plan_name} をバージョン v{summary.version} として保存しました。",
-                            icon="✅",
+                            icon="✔",
                         )
                         st.session_state["plan_save_note"] = ""
                     except AuthError as exc:
@@ -3849,7 +3849,7 @@ elif current_step == "tax":
                         elif _hydrate_snapshot(payload):
                             st.toast(
                                 f"{selected_plan.name} v{selected_version.version} を読み込みました。",
-                                icon="✅",
+                                icon="✔",
                             )
                             st.experimental_rerun()
                 else:

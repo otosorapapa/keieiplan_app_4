@@ -20,7 +20,7 @@ from ui.streamlit_compat import use_container_width_kwargs
 
 st.set_page_config(
     page_title="経営計画スタジオ｜Settings",
-    page_icon="⚙️",
+    page_icon="⚙",
     layout="wide",
 )
 
@@ -33,7 +33,7 @@ fte = float(settings_state.get("fte", 20.0))
 fiscal_year = int(settings_state.get("fiscal_year", 2025))
 language = str(settings_state.get("language", "ja"))
 
-st.title("⚙️ アプリ設定")
+st.title("アプリ設定")
 st.caption("表示単位や言語、既定値、データバックアップを管理できます。")
 
 unit_tab, language_tab, defaults_tab, backup_tab = st.tabs([
@@ -69,7 +69,7 @@ with defaults_tab:
             "tax": DEFAULT_TAX_POLICY.model_dump(),
         }
         st.session_state.pop("finance_models", None)
-        st.toast("既定値にリセットしました。", icon="✅")
+        st.toast("既定値にリセットしました。", icon="✔")
 
 if st.button("設定を保存", type="primary"):
         st.session_state["finance_settings"] = {
@@ -78,7 +78,7 @@ if st.button("設定を保存", type="primary"):
             "fte": float(fte),
             "fiscal_year": int(fiscal_year),
         }
-        st.toast("設定を保存しました。", icon="✅")
+        st.toast("設定を保存しました。", icon="✔")
 
 with backup_tab:
     st.subheader("バックアップとセキュリティ")
@@ -91,7 +91,7 @@ with backup_tab:
         backup_payload = auth.export_backup() or {}
         backup_bytes = json.dumps(backup_payload, ensure_ascii=False, indent=2).encode("utf-8")
         st.download_button(
-            "📥 JSONバックアップをダウンロード",
+            "［JSON］バックアップをダウンロード",
             data=backup_bytes,
             file_name="keieiplan_backup.json",
             mime="application/json",

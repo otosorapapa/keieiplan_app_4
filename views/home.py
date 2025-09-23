@@ -59,7 +59,18 @@ def render_home_page() -> None:
     summary_tab, tutorial_tab = st.tabs(["概要", "チュートリアル"])
 
     with summary_tab:
-        st.subheader("📌 現状サマリー")
+        st.markdown(
+            """
+            <div class=\"section-heading\" role=\"presentation\">
+                <div class=\"section-heading__icon\" aria-hidden=\"true\"></div>
+                <div>
+                    <h2 class=\"section-heading__title\">現状サマリー</h2>
+                    <p class=\"section-heading__subtitle\">最新の主要KPIで現状を俯瞰</p>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         if not has_custom_inputs:
             st.info("入力ページでデータを保存すると、ここに最新のKPIが表示されます。")
@@ -78,7 +89,7 @@ def render_home_page() -> None:
 
     metric_cards = [
         MetricCard(
-            icon="💴",
+            icon="¥",
             label="売上高",
             value=format_amount_with_unit(amounts.get("REV", Decimal("0")), unit),
             description="チャネル×商品×月の年間売上合計",
@@ -86,16 +97,16 @@ def render_home_page() -> None:
             assistive_text="売上高のカード。チャネル×商品×月の年間売上合計です。",
         ),
         MetricCard(
-            icon="📈",
+            icon="↗",
             label="粗利率",
             value=format_ratio(metrics.get("gross_margin")),
             description="粗利÷売上で算出される利益率",
             aria_label="粗利率",
             tone="positive" if (metrics.get("gross_margin") or Decimal("0")) >= Decimal("0.3") else "neutral",
-            assistive_text="粗利率のカード。数値が高いほど利益体質が良好で、色とアイコンで状況を示しています。",
+            assistive_text="粗利率のカード。数値が高いほど利益体質が良好で、トーンバッジで状況を示しています。",
         ),
         MetricCard(
-            icon="🏦",
+            icon="Σ",
             label="経常利益",
             value=format_amount_with_unit(amounts.get("ORD", Decimal("0")), unit),
             description="営業外収支も含めた利益水準",
@@ -103,13 +114,13 @@ def render_home_page() -> None:
             assistive_text="経常利益のカード。営業外収支を含めた年間の利益水準です。",
         ),
         MetricCard(
-            icon="🎯",
+            icon="⚑",
             label="損益分岐点売上高",
             value=format_amount_with_unit(metrics.get("breakeven"), unit),
             description="固定費を回収するために必要な売上高",
             aria_label="損益分岐点の売上高",
             tone="caution",
-            assistive_text="損益分岐点売上高のカード。⚠️バッジで注意が必要なことを示します。",
+            assistive_text="損益分岐点売上高のカード。△バッジで注意が必要なことを示します。",
         ),
     ]
     render_metric_cards(metric_cards, grid_aria_label="主要指標サマリー")
@@ -118,14 +129,25 @@ def render_home_page() -> None:
 
     if not auth.is_authenticated():
         render_callout(
-            icon="🔐",
+            icon="▣",
             title="ログインするとクラウド保存とバージョン管理が利用できます",
             body="ヘッダー右上のログインからアカウントを作成すると、入力データをクラウドに保存し、シナリオ別にバージョン管理できます。",
             tone="caution",
             aria_label="ログインを促す案内",
         )
 
-    st.markdown("### 次のステップ")
+    st.markdown(
+        """
+        <div class=\"section-heading\" role=\"presentation\">
+            <div class=\"section-heading__icon\" aria-hidden=\"true\"></div>
+            <div>
+                <h2 class=\"section-heading__title\">次のステップ</h2>
+                <p class=\"section-heading__subtitle\">ライトブルーの導線で操作手順を整理</p>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.markdown(
         """
         1. **Inputs** ページで売上・原価・費用・投資・借入・税制を登録する
@@ -137,7 +159,18 @@ def render_home_page() -> None:
     )
 
     with tutorial_tab:
-        st.subheader("🧭 チュートリアル")
+        st.markdown(
+            """
+            <div class=\"section-heading\" role=\"presentation\">
+                <div class=\"section-heading__icon\" aria-hidden=\"true\"></div>
+                <div>
+                    <h2 class=\"section-heading__title\">チュートリアル</h2>
+                    <p class=\"section-heading__subtitle\">主要な操作ポイントを簡潔に整理</p>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.markdown(
             """
             - **セッションの保持**: サイドバーのページ遷移でも入力値はセッションステートに保存されます。

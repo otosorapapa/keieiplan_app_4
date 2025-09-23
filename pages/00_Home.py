@@ -7,7 +7,7 @@ from views import render_home_page
 
 st.set_page_config(
     page_title="経営計画スタジオ｜概要",
-    page_icon="📊",
+    page_icon="▥",
     layout="wide",
 )
 
