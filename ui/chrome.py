@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable
+import html
 
 import streamlit as st
 from services import auth
@@ -207,7 +208,27 @@ def render_app_footer(
     """Render the global footer."""
 
     st.divider()
-    st.caption(caption)
+    safe_caption = html.escape(caption)
+    st.markdown(
+        """
+        <footer class="app-footer" role="contentinfo">
+            <div class="app-footer__brand">
+                <span class="app-footer__logo" aria-hidden="true">▥</span>
+                <div>
+                    <span class="app-footer__brand-name">経営計画スタジオ</span>
+                    <span class="app-footer__tagline">Powered by AI & Consulting</span>
+                </div>
+            </div>
+            <div class="app-footer__links">
+                <a href="mailto:support@keieiplan.jp">サポートに連絡</a>
+                <span aria-hidden="true">／</span>
+                <a href="https://keieiplan.jp/policy" target="_blank" rel="noopener noreferrer">利用規約</a>
+            </div>
+            <p class="app-footer__caption">{caption}</p>
+        </footer>
+        """.format(caption=safe_caption),
+        unsafe_allow_html=True,
+    )
 
 
 __all__ = [

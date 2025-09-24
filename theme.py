@@ -516,6 +516,299 @@ button:focus-visible {{
     font-size: calc(0.92rem * var(--base-font-scale));
 }}
 
+.form-card {{
+    background: linear-gradient(140deg, rgba(255, 255, 255, 0.98) 0%, rgba(231, 236, 247, 0.9) 100%);
+    border-radius: 24px;
+    padding: 1.6rem 1.8rem;
+    margin: 1.2rem 0;
+    box-shadow: 0 20px 36px rgba(6, 19, 37, 0.08);
+    border: 1px solid rgba(15, 44, 79, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+}}
+
+.form-card__header {{
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+}}
+
+.form-card__icon {{
+    width: 2.2rem;
+    height: 2.2rem;
+    border-radius: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(28, 106, 216, 0.14);
+    color: var(--accent);
+    font-size: 1.1rem;
+    font-weight: 600;
+}}
+
+.form-card__heading {{
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}}
+
+.form-card__title {{
+    margin: 0;
+    font-size: calc(1.08rem * var(--base-font-scale));
+    font-weight: 600;
+}}
+
+.form-card__subtitle {{
+    margin: 0;
+    font-size: calc(0.9rem * var(--base-font-scale));
+    color: var(--text-subtle);
+    font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
+}}
+
+.form-card__body {{
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+}}
+
+.wizard-stepper {{
+    margin: 1rem 0 1.4rem;
+    padding: 1.3rem 1.6rem;
+    border-radius: 26px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(231, 236, 247, 0.92) 100%);
+    border: 1px solid rgba(15, 44, 79, 0.1);
+    box-shadow: 0 22px 40px rgba(6, 19, 37, 0.12);
+}}
+
+.wizard-stepper__progress {{
+    position: relative;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(15, 44, 79, 0.1);
+    margin-bottom: 1.1rem;
+    overflow: hidden;
+}}
+
+.wizard-stepper__progress-bar {{
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(28, 106, 216, 0.85) 0%, rgba(52, 124, 214, 0.85) 100%);
+    border-radius: inherit;
+    transition: width 0.4s ease;
+}}
+
+.wizard-stepper__list {{
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.75rem;
+}}
+
+.wizard-stepper__item {{
+    background: rgba(15, 44, 79, 0.04);
+    border-radius: 20px;
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    border: 1px solid rgba(15, 44, 79, 0.08);
+    min-height: 4.2rem;
+}}
+
+.wizard-stepper__item--completed {{
+    background: rgba(28, 106, 216, 0.08);
+    border-color: rgba(28, 106, 216, 0.18);
+}}
+
+.wizard-stepper__item--current {{
+    background: linear-gradient(140deg, rgba(28, 106, 216, 0.2) 0%, rgba(15, 44, 79, 0.16) 100%);
+    border-color: rgba(28, 106, 216, 0.3);
+    box-shadow: 0 20px 36px rgba(28, 106, 216, 0.18);
+}}
+
+.wizard-stepper__bullet {{
+    width: 2.2rem;
+    height: 2.2rem;
+    border-radius: 50%;
+    background: rgba(28, 106, 216, 0.16);
+    color: var(--accent);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 1.05rem;
+}}
+
+.wizard-stepper__text {{
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}}
+
+.wizard-stepper__step-index {{
+    font-size: calc(0.82rem * var(--base-font-scale));
+    color: var(--text-subtle);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}}
+
+.wizard-stepper__title {{
+    font-size: calc(0.98rem * var(--base-font-scale));
+    font-weight: 600;
+    color: var(--accent);
+}}
+
+.wizard-stepper__description {{
+    font-size: calc(0.82rem * var(--base-font-scale));
+    color: var(--text-subtle);
+}}
+
+.wizard-stepper__meta {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    font-size: calc(0.85rem * var(--base-font-scale));
+    color: var(--text-subtle);
+    margin-bottom: 0.4rem;
+}}
+
+.formula-highlight {{
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.2rem;
+    border-radius: 20px;
+    background: linear-gradient(120deg, rgba(28, 106, 216, 0.12) 0%, rgba(231, 236, 247, 0.8) 100%);
+    border: 1px solid rgba(15, 44, 79, 0.12);
+    box-shadow: 0 18px 34px rgba(6, 19, 37, 0.08);
+    margin: 1.1rem 0;
+}}
+
+.formula-highlight__icon {{
+    width: 2.4rem;
+    height: 2.4rem;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(28, 106, 216, 0.16);
+    color: var(--accent);
+    font-size: 1.2rem;
+    font-weight: 600;
+}}
+
+.formula-highlight__body strong {{
+    display: block;
+    margin-bottom: 0.2rem;
+    font-size: calc(1.02rem * var(--base-font-scale));
+}}
+
+.formula-highlight__body p {{
+    margin: 0;
+    font-size: calc(0.9rem * var(--base-font-scale));
+    color: var(--text-subtle);
+}}
+
+.context-hint {{
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 20px;
+    padding: 1rem 1.2rem;
+    border: 1px solid rgba(15, 44, 79, 0.1);
+    box-shadow: 0 18px 30px rgba(6, 19, 37, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    margin-bottom: 1rem;
+}}
+
+.context-hint__title {{
+    font-weight: 600;
+    font-size: calc(0.95rem * var(--base-font-scale));
+    color: var(--accent);
+}}
+
+.context-hint__summary {{
+    margin: 0;
+    font-size: calc(0.85rem * var(--base-font-scale));
+    color: var(--text-subtle);
+}}
+
+.context-hint__metrics {{
+    margin: 0;
+    padding-left: 1.1rem;
+    display: grid;
+    gap: 0.2rem;
+    font-size: calc(0.82rem * var(--base-font-scale));
+    color: var(--text-subtle);
+}}
+
+.context-hint__footer {{
+    margin-top: 0.15rem;
+}}
+
+.context-hint__link {{
+    font-size: calc(0.82rem * var(--base-font-scale));
+    color: var(--primary);
+    text-decoration: underline;
+}}
+
+.app-footer {{
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0.6rem 0 1.2rem 0;
+}}
+
+.app-footer__brand {{
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}}
+
+.app-footer__logo {{
+    width: 2.2rem;
+    height: 2.2rem;
+    border-radius: 16px;
+    background: rgba(28, 106, 216, 0.14);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    color: var(--accent);
+}}
+
+.app-footer__brand-name {{
+    display: block;
+    font-weight: 600;
+}}
+
+.app-footer__tagline {{
+    display: block;
+    font-size: calc(0.85rem * var(--base-font-scale));
+    color: var(--text-subtle);
+}}
+
+.app-footer__links {{
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    font-size: calc(0.82rem * var(--base-font-scale));
+}}
+
+.app-footer__links a {{
+    color: var(--primary);
+    text-decoration: underline;
+}}
+
+.app-footer__caption {{
+    margin: 0;
+    font-size: calc(0.82rem * var(--base-font-scale));
+    color: var(--text-subtle);
+}}
+
 .wizard-checklist {{
     display: grid;
     gap: 0.35rem;
@@ -613,6 +906,12 @@ button[kind="primary"]:focus-visible {{
     .responsive-card-grid {{
         grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     }}
+    .form-card {{
+        padding: 1.35rem 1.45rem;
+    }}
+    .wizard-stepper__list {{
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }}
     [data-testid="stSidebar"] {{
         width: calc(17rem - 9rem * var(--sidebar-compact));
     }}
@@ -640,6 +939,21 @@ button[kind="primary"]:focus-visible {{
     }}
     .responsive-card-grid {{
         grid-template-columns: 1fr;
+    }}
+    .form-card {{
+        margin: 1rem 0;
+        padding: 1.2rem 1.3rem;
+    }}
+    .wizard-stepper__list {{
+        grid-template-columns: 1fr;
+    }}
+    .formula-highlight {{
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }}
+    .context-hint {{
+        padding: 0.85rem 1rem;
     }}
     [data-testid="stSidebar"] {{
         width: calc(16rem - 10rem * var(--sidebar-compact));

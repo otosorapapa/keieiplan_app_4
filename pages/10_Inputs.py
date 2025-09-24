@@ -1,8 +1,10 @@
 """Input hub for sales, costs, investments, borrowings and tax policy."""
 from __future__ import annotations
 
+import html
 import io
 import json
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime
 from decimal import Decimal
@@ -151,26 +153,36 @@ WIZARD_STEPS = [
         "id": "context",
         "title": "ビジネスモデル整理",
         "description": "3C分析・ビジネスモデルキャンバス・SWOT/PESTで事業環境を整理します。",
+        "eta_minutes": 10,
+        "question_count": 9,
     },
     {
         "id": "sales",
         "title": "売上計画",
         "description": "チャネル×商品×月で売上を想定し、季節性や販促を織り込みます。",
+        "eta_minutes": 15,
+        "question_count": 12,
     },
     {
         "id": "costs",
         "title": "原価・経費",
         "description": "粗利益率を意識しながら変動費・固定費・営業外項目を整理します。",
+        "eta_minutes": 12,
+        "question_count": 10,
     },
     {
         "id": "invest",
         "title": "投資・借入",
         "description": "成長投資と資金調達のスケジュールを設定します。",
+        "eta_minutes": 8,
+        "question_count": 6,
     },
     {
         "id": "tax",
         "title": "税制・保存",
         "description": "税率と最終チェックを行い、入力内容を保存します。",
+        "eta_minutes": 5,
+        "question_count": 4,
     },
 ]
 
@@ -193,6 +205,53 @@ BUSINESS_CONTEXT_PLACEHOLDER = {
     "bmc_channels": "顧客に価値を届けるチャネル (例：ECサイト、代理店、直販営業)",
     "qualitative_memo": "事業計画書に記載したい補足・KGI/KPIの背景",
 }
+
+INDUSTRY_CONTEXT_HINTS = [
+    {
+        "keywords": {"製造", "製造業", "工場", "メーカー"},
+        "title": "製造業のベンチマーク",
+        "summary": "粗利率28〜35%、在庫回転日数45日前後が平均レンジ。設備投資と生産性改善が利益率向上のカギです。",
+        "metrics": [
+            "労働分配率: 55%前後が安定水準",
+            "設備投資比率: 売上高の3〜4%が目安",
+        ],
+        "link_label": "中小企業庁『2023年版中小企業白書』",
+        "link_url": "https://www.chusho.meti.go.jp/pamflet/hakusyo/2023/index.html",
+    },
+    {
+        "keywords": {"飲食", "外食", "レストラン", "カフェ"},
+        "title": "飲食業の改善ポイント",
+        "summary": "FLコスト(原価+人件費)60%以内、客単価と回転率の掛け合わせで売上を最大化します。",
+        "metrics": [
+            "原価率: 30〜35%が標準レンジ",
+            "平均客単価: ランチ1,000〜1,200円 / ディナー3,000円前後",
+        ],
+        "link_label": "日本政策金融公庫『外食産業動向調査』",
+        "link_url": "https://www.jfc.go.jp/n/findings/pdf/seikaichosa.pdf",
+    },
+    {
+        "keywords": {"小売", "EC", "リテール", "物販"},
+        "title": "小売・ECの指標",
+        "summary": "在庫回転日数40日前後、粗利率30%超で営業利益率を確保。デジタル広告ROIを追跡しましょう。",
+        "metrics": [
+            "LTV/CAC比率: 3倍以上を目標",
+            "リピート購入率: 25〜30%が優良水準",
+        ],
+        "link_label": "経済産業省『電子商取引に関する市場調査』",
+        "link_url": "https://www.meti.go.jp/policy/it_policy/statistics/index.html",
+    },
+    {
+        "keywords": {"SaaS", "サブスク", "ITサービス", "クラウド"},
+        "title": "SaaS/サブスクのKPI",
+        "summary": "解約率5%以下、ARR成長率20%以上でスケール。アップセルと顧客成功の体制を整えましょう。",
+        "metrics": [
+            "解約率(Churn): 月次0.6%以下が優秀",
+            "LTV/CAC: 3倍以上、回収期間12か月以内",
+        ],
+        "link_label": "OpenView『SaaS Benchmarks』",
+        "link_url": "https://openviewpartners.com/saas-metrics/",
+    },
+]
 
 STRATEGIC_ANALYSIS_KEY = "strategic_analysis"
 MARKETING_STRATEGY_SNAPSHOT_KEY = "marketing_strategy_snapshot"
@@ -371,6 +430,119 @@ def _persist_financial_timeseries(df: pd.DataFrame, fiscal_year: int) -> None:
         "records": records,
         "base_year": int(fiscal_year),
     }
+
+
+def _gather_contextual_navigation(
+    context_state: Dict[str, str],
+    sales_df: pd.DataFrame,
+) -> List[Dict[str, object]]:
+    """Return industry-specific hints based on context text and sales channels."""
+
+    text_segments: List[str] = []
+    for key in (
+        "bmc_customer_segments",
+        "three_c_customer",
+        "qualitative_memo",
+    ):
+        value = str(context_state.get(key, ""))
+        if value:
+            text_segments.append(value)
+
+    if not sales_df.empty:
+        for column in ("チャネル", "商品", "メモ"):
+            if column in sales_df.columns:
+                text_segments.extend(
+                    str(entry)
+                    for entry in sales_df[column].tolist()
+                    if isinstance(entry, str)
+                )
+
+    combined_text = " ".join(text_segments)
+    matched: List[Dict[str, object]] = []
+    seen_titles: set[str] = set()
+    if not combined_text.strip():
+        return matched
+
+    for hint in INDUSTRY_CONTEXT_HINTS:
+        keywords = hint.get("keywords", set())
+        if any(keyword in combined_text for keyword in keywords):
+            title = str(hint.get("title", ""))
+            if title and title not in seen_titles:
+                matched.append(hint)
+                seen_titles.add(title)
+    return matched[:3]
+
+
+def _render_contextual_hint_blocks(hints: List[Dict[str, object]]) -> None:
+    """Render contextual navigation cards highlighting industry resources."""
+
+    if not hints:
+        return
+    for hint in hints:
+        title = html.escape(str(hint.get("title", "")))
+        summary = html.escape(str(hint.get("summary", "")))
+        metrics_html = ""
+        metrics = hint.get("metrics") or []
+        if isinstance(metrics, (list, tuple)) and metrics:
+            items = "".join(
+                f"<li>{html.escape(str(metric))}</li>" for metric in metrics
+            )
+            metrics_html = f"<ul class='context-hint__metrics'>{items}</ul>"
+        link_label = str(hint.get("link_label", ""))
+        link_url = str(hint.get("link_url", ""))
+        link_html = ""
+        if link_label and link_url:
+            link_html = (
+                "<a class='context-hint__link' href=\"{url}\" target=\"_blank\" "
+                "rel=\"noopener noreferrer\">{label}</a>"
+            ).format(url=html.escape(link_url, quote=True), label=html.escape(link_label))
+        block_html = (
+            "<div class='context-hint' role='note'>"
+            f"  <div class='context-hint__title'>{title}</div>"
+            f"  <p class='context-hint__summary'>{summary}</p>"
+            f"  {metrics_html}"
+            f"  <div class='context-hint__footer'>{link_html}</div>"
+            "</div>"
+        )
+        st.markdown(block_html, unsafe_allow_html=True)
+
+
+@contextmanager
+def form_card(
+    *, title: str | None = None, subtitle: str | None = None, icon: str | None = None
+):
+    """Provide a padded card container to group related form controls."""
+
+    container = st.container()
+    with container:
+        header_parts: List[str] = ["<section class='form-card'>"]
+        if title or subtitle:
+            icon_html = (
+                f"<span class='form-card__icon' aria-hidden='true'>{html.escape(icon)}</span>"
+                if icon
+                else ""
+            )
+            heading_fragments = []
+            if title:
+                heading_fragments.append(
+                    f"<h3 class='form-card__title'>{html.escape(title)}</h3>"
+                )
+            if subtitle:
+                heading_fragments.append(
+                    f"<p class='form-card__subtitle'>{html.escape(subtitle)}</p>"
+                )
+            header_parts.append(
+                "<header class='form-card__header'>"
+                f"{icon_html}"
+                f"<div class='form-card__heading'>{''.join(heading_fragments)}</div>"
+                "</header>"
+            )
+        header_parts.append("<div class='form-card__body'>")
+        st.markdown("".join(header_parts), unsafe_allow_html=True)
+        body_container = st.container()
+        with body_container:
+            yield
+        st.markdown("</div></section>", unsafe_allow_html=True)
 
 
 def _swot_editor_dataframe_from_state(records: List[Dict[str, object]] | None) -> pd.DataFrame:
@@ -1882,16 +2054,62 @@ def _get_step_index(step_id: str) -> int:
 
 def _render_stepper(current_step: str) -> int:
     step_index = _get_step_index(current_step)
-    progress_ratio = (step_index + 1) / len(WIZARD_STEPS)
-    st.progress(progress_ratio, text=f"ステップ {step_index + 1} / {len(WIZARD_STEPS)}")
-    labels: List[str] = []
+    total_steps = len(WIZARD_STEPS)
+    progress_ratio = (step_index + 1) / total_steps
+    progress_percent = int(progress_ratio * 100)
+
+    nav_items: List[str] = []
     for idx, step in enumerate(WIZARD_STEPS):
-        label = f"{idx + 1}. {step['title']}"
-        if step["id"] == current_step:
-            label = f"**{label}**"
-        labels.append(label)
-    st.markdown(" → ".join(labels))
-    st.caption(WIZARD_STEPS[step_index]["description"])
+        status = "completed" if idx < step_index else ("current" if idx == step_index else "upcoming")
+        icon = "✓" if status == "completed" else ("●" if status == "current" else "○")
+        title_html = html.escape(step["title"])
+        description_html = (
+            f"<span class='wizard-stepper__description'>{html.escape(step['description'])}</span>"
+            if status == "current"
+            else ""
+        )
+        nav_items.append(
+            (
+                f"<li class='wizard-stepper__item wizard-stepper__item--{status}'>"
+                f"  <span class='wizard-stepper__bullet' aria-hidden='true'>{html.escape(icon)}</span>"
+                f"  <div class='wizard-stepper__text'>"
+                f"    <span class='wizard-stepper__step-index'>STEP {idx + 1}</span>"
+                f"    <span class='wizard-stepper__title'>{title_html}</span>"
+                f"    {description_html}"
+                "  </div>"
+                "</li>"
+            )
+        )
+
+    nav_html = (
+        "<nav class='wizard-stepper' aria-label='入力ステップ'>"
+        "  <div class='wizard-stepper__progress' role='progressbar' aria-valuemin='0' aria-valuemax='100' "
+        f"aria-valuenow='{progress_percent}' aria-valuetext='ステップ {step_index + 1} / {total_steps}'>"
+        f"    <span class='wizard-stepper__progress-bar' style='width:{progress_percent}%'></span>"
+        "  </div>"
+        f"  <ol class='wizard-stepper__list'>{''.join(nav_items)}</ol>"
+        "</nav>"
+    )
+    st.markdown(nav_html, unsafe_allow_html=True)
+
+    current_step_meta = WIZARD_STEPS[step_index]
+    eta_minutes = int(current_step_meta.get("eta_minutes", 0) or 0)
+    remaining_questions = sum(
+        int(step.get("question_count", 0) or 0)
+        for step in WIZARD_STEPS[step_index:]
+    )
+    meta_parts = [f"STEP {step_index + 1} / {total_steps}"]
+    if eta_minutes:
+        meta_parts.append(f"所要時間: 約{eta_minutes}分")
+    if remaining_questions:
+        meta_parts.append(f"残り質問数: {remaining_questions}項目")
+    if meta_parts:
+        st.markdown(
+            f"<div class='wizard-stepper__meta'>{html.escape(' ｜ '.join(meta_parts))}</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.caption(current_step_meta["description"])
     return step_index
 
 
@@ -2039,6 +2257,8 @@ current_step = str(st.session_state[INPUT_WIZARD_STEP_KEY])
 capex_editor_snapshot = pd.DataFrame(st.session_state.get("capex_editor_df", capex_defaults_df))
 loan_editor_snapshot = pd.DataFrame(st.session_state.get("loan_editor_df", loan_defaults_df))
 
+contextual_nav_items = _gather_contextual_navigation(context_state, sales_df)
+
 completion_flags = _calculate_completion_flags(
     context_state=context_state,
     sales_df=sales_df,
@@ -2075,6 +2295,10 @@ with st.sidebar.expander("用語集", expanded=False):
         - **借入金**： 金融機関等からの調達。金利と返済期間を設定します。
         """
     )
+if contextual_nav_items:
+    with st.sidebar.expander("業界リサーチのヒント", expanded=True):
+        st.caption("顧客セグメントに合わせたKPIや公式資料へのリンクです。入力に応じて更新されます。")
+        _render_contextual_hint_blocks(contextual_nav_items)
 st.sidebar.info("入力途中でもステップを行き来できます。最終ステップで保存すると数値が確定します。")
 
 step_index = _render_stepper(current_step)
@@ -2097,429 +2321,421 @@ if current_step == "context":
     else:
         st.caption("保存ステータス: 入力内容は自動保存されます。")
 
-    three_c_cols = st.columns(3)
-    with three_c_cols[0]:
-        context_state["three_c_customer"] = st.text_area(
-            "Customer（顧客）",
-            value=context_state.get("three_c_customer", ""),
-            placeholder=BUSINESS_CONTEXT_PLACEHOLDER["three_c_customer"],
-            help="想定顧客層や顧客課題を記入してください。",
-            height=150,
-        )
-        st.caption(CUSTOMER_EXAMPLE_TEXT)
-    with three_c_cols[1]:
-        context_state["three_c_company"] = st.text_area(
-            "Company（自社）",
-            value=context_state.get("three_c_company", ""),
-            placeholder=BUSINESS_CONTEXT_PLACEHOLDER["three_c_company"],
-            help="自社の強み・提供価値・リソースを整理しましょう。",
-            height=150,
-        )
-    with three_c_cols[2]:
-        context_state["three_c_competitor"] = st.text_area(
-            "Competitor（競合）",
-            value=context_state.get("three_c_competitor", ""),
-            placeholder=BUSINESS_CONTEXT_PLACEHOLDER["three_c_competitor"],
-            help="競合の特徴や比較したときの優位性・弱点を記入します。",
-            height=150,
-        )
 
-    st.markdown("#### ビジネスモデルキャンバス（主要要素）")
-    bmc_cols = st.columns(3)
-    with bmc_cols[0]:
-        context_state["bmc_customer_segments"] = st.text_area(
-            "顧客セグメント",
-            value=context_state.get("bmc_customer_segments", ""),
-            placeholder=BUSINESS_CONTEXT_PLACEHOLDER["bmc_customer_segments"],
-            help="年齢・職種・企業規模など、ターゲット顧客の解像度を高めましょう。",
-            height=160,
-        )
-    with bmc_cols[1]:
-        context_state["bmc_value_proposition"] = st.text_area(
-            "提供価値",
-            value=context_state.get("bmc_value_proposition", ""),
-            placeholder=BUSINESS_CONTEXT_PLACEHOLDER["bmc_value_proposition"],
-            help="顧客課題をどのように解決するか、成功事例なども記載すると有効です。",
-            height=160,
-        )
-    with bmc_cols[2]:
-        context_state["bmc_channels"] = st.text_area(
-            "チャネル",
-            value=context_state.get("bmc_channels", ""),
-            placeholder=BUSINESS_CONTEXT_PLACEHOLDER["bmc_channels"],
-            help="オンライン・オフラインの接点や販売フローを整理してください。",
-            height=160,
-        )
-
-    context_state["qualitative_memo"] = st.text_area(
-        "事業計画メモ",
-        value=context_state.get("qualitative_memo", ""),
-        placeholder=BUSINESS_CONTEXT_PLACEHOLDER["qualitative_memo"],
-        help="KGI/KPIの設定根拠、注意点、投資判断に必要な情報などを自由に記入できます。",
-        height=140,
-    )
-    st.caption("※ 記入した内容はウィザード内で保持され、事業計画書作成時の定性情報として活用できます。")
-
-    st.markdown("#### マーケティング戦略（4P/3C入力）")
-    st.caption(
-        "製品（Product）・価格（Price）・流通チャネル（Place）・プロモーション（Promotion）の4Pは、"
-        "マーケティングミックスの基本構成要素であり、効果的な市場戦略を組み立てる土台となります（Investopedia）。"
-    )
-    st.markdown("##### 4Pの現状整理と課題")
-    st.caption("現状・課題・重視するKPIを記入すると、下部で強化策が自動提案されます。")
-
-    four_p_state = marketing_state.get("four_p", {})
-    for key in FOUR_P_KEYS:
-        label = FOUR_P_LABELS[key]
-        entry = four_p_state.get(key, {})
-        guide = FOUR_P_INPUT_GUIDE.get(key, {})
-        with st.expander(label, expanded=(key == "product")):
-            entry["current"] = st.text_area(
-                f"{label}｜現状の取り組み",
-                value=str(entry.get("current", "")),
-                placeholder=str(guide.get("current", "")),
-                height=130,
+    with form_card(
+        title="3C分析サマリー",
+        subtitle="顧客・自社・競合の視点を簡潔に整理",
+        icon="3C",
+    ):
+        st.caption("顧客(Customer)・自社(Company)・競合(Competitor)を1〜2行で整理すると仮説が明確になります。")
+        three_c_cols = st.columns(3, gap="large")
+        with three_c_cols[0]:
+            context_state["three_c_customer"] = st.text_area(
+                "Customer（顧客）",
+                value=context_state.get("three_c_customer", ""),
+                placeholder=BUSINESS_CONTEXT_PLACEHOLDER["three_c_customer"],
+                help="想定顧客層や顧客課題を記入してください。",
+                height=160,
             )
-            entry["challenge"] = st.text_area(
-                f"{label}｜課題・制約",
-                value=str(entry.get("challenge", "")),
-                placeholder=str(guide.get("challenge", "")),
+            st.caption(CUSTOMER_EXAMPLE_TEXT)
+        with three_c_cols[1]:
+            context_state["three_c_company"] = st.text_area(
+                "Company（自社）",
+                value=context_state.get("three_c_company", ""),
+                placeholder=BUSINESS_CONTEXT_PLACEHOLDER["three_c_company"],
+                help="自社の強み・提供価値・リソースを整理しましょう。",
+                height=160,
+            )
+        with three_c_cols[2]:
+            context_state["three_c_competitor"] = st.text_area(
+                "Competitor（競合）",
+                value=context_state.get("three_c_competitor", ""),
+                placeholder=BUSINESS_CONTEXT_PLACEHOLDER["three_c_competitor"],
+                help="競合の特徴や比較したときの優位性・弱点を記入します。",
+                height=160,
+            )
+
+    with form_card(
+        title="ビジネスモデルキャンバス（主要要素）",
+        subtitle="顧客価値とチャネルの整合性を確認",
+        icon="▦",
+    ):
+        st.caption("価値提案とチャネル、顧客セグメントの整合を確認し、計画の背景を言語化します。")
+        bmc_cols = st.columns(3, gap="large")
+        with bmc_cols[0]:
+            context_state["bmc_customer_segments"] = st.text_area(
+                "顧客セグメント",
+                value=context_state.get("bmc_customer_segments", ""),
+                placeholder=BUSINESS_CONTEXT_PLACEHOLDER["bmc_customer_segments"],
+                help="年齢・職種・企業規模など、ターゲット顧客の解像度を高めましょう。",
+                height=170,
+            )
+        with bmc_cols[1]:
+            context_state["bmc_value_proposition"] = st.text_area(
+                "提供価値",
+                value=context_state.get("bmc_value_proposition", ""),
+                placeholder=BUSINESS_CONTEXT_PLACEHOLDER["bmc_value_proposition"],
+                help="顧客課題をどのように解決するか、成功事例なども記載すると有効です。",
+                height=170,
+            )
+        with bmc_cols[2]:
+            context_state["bmc_channels"] = st.text_area(
+                "チャネル",
+                value=context_state.get("bmc_channels", ""),
+                placeholder=BUSINESS_CONTEXT_PLACEHOLDER["bmc_channels"],
+                help="オンライン・オフラインの接点や販売フローを整理してください。",
+                height=170,
+            )
+
+        context_state["qualitative_memo"] = st.text_area(
+            "事業計画メモ",
+            value=context_state.get("qualitative_memo", ""),
+            placeholder=BUSINESS_CONTEXT_PLACEHOLDER["qualitative_memo"],
+            help="KGI/KPIの設定根拠、注意点、投資判断に必要な情報などを自由に記入できます。",
+            height=150,
+        )
+        st.caption("※ 記入した内容はウィザード内で保持され、事業計画書作成時の定性情報として活用できます。")
+
+    with form_card(
+        title="マーケティング戦略（4P/3C入力）",
+        subtitle="現状・課題・KPIを整理して自動提案に活用",
+        icon="✸",
+    ):
+        st.caption(
+            "製品（Product）・価格（Price）・流通チャネル（Place）・プロモーション（Promotion）の4Pは、"
+            "マーケティングミックスの基本構成要素であり、効果的な市場戦略を組み立てる土台となります（Investopedia）。"
+        )
+        st.markdown("#### 4Pの現状整理と課題")
+        st.caption("現状・課題・重視するKPIを記入すると、下部で強化策が自動提案されます。")
+
+        four_p_state = marketing_state.get("four_p", {})
+        for key in FOUR_P_KEYS:
+            label = FOUR_P_LABELS[key]
+            entry = four_p_state.get(key, {})
+            guide = FOUR_P_INPUT_GUIDE.get(key, {})
+            with st.expander(label, expanded=(key == "product")):
+                entry["current"] = st.text_area(
+                    f"{label}｜現状の取り組み",
+                    value=str(entry.get("current", "")),
+                    placeholder=str(guide.get("current", "")),
+                    height=130,
+                )
+                entry["challenge"] = st.text_area(
+                    f"{label}｜課題・制約",
+                    value=str(entry.get("challenge", "")),
+                    placeholder=str(guide.get("challenge", "")),
+                    height=120,
+                )
+                entry["metric"] = st.text_input(
+                    f"{label}｜重視するKPI・数値目標",
+                    value=str(entry.get("metric", "")),
+                    placeholder=str(guide.get("metric", "")),
+                    help="具体的な数値（例：解約率5%、月間リード120件など）を入れると提案が精緻になります。",
+                )
+                if key == "price":
+                    try:
+                        current_price = float(entry.get("price_point", 0.0) or 0.0)
+                    except (TypeError, ValueError):
+                        current_price = 0.0
+                    entry["price_point"] = st.number_input(
+                        "自社の主要プラン価格（円・税込/税抜いずれでも可）",
+                        min_value=0.0,
+                        value=current_price,
+                        step=100.0,
+                        help="平均的な契約金額や代表的なプラン価格を入力してください。",
+                    )
+
+        st.markdown("#### Customer（市場・顧客）")
+        customer_state = marketing_state.get("customer", {})
+        customer_cols = st.columns(2, gap="large")
+        with customer_cols[0]:
+            try:
+                market_size_value = float(customer_state.get("market_size", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                market_size_value = 0.0
+            customer_state["market_size"] = st.number_input(
+                "市場規模（円や想定ユーザー数）",
+                min_value=0.0,
+                value=market_size_value,
+                step=1000.0,
+                help="単位は自由です。例：1200000000（円）や2000（社）。",
+            )
+            try:
+                growth_value = float(customer_state.get("growth_rate", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                growth_value = 0.0
+            customer_state["growth_rate"] = st.number_input(
+                "年成長率（%）",
+                min_value=-100.0,
+                max_value=500.0,
+                value=growth_value,
+                step=1.0,
+            )
+        with customer_cols[1]:
+            customer_state["needs"] = st.text_area(
+                "主要ニーズ・顧客課題",
+                value=str(customer_state.get("needs", "")),
+                placeholder=MARKETING_CUSTOMER_PLACEHOLDER["needs"],
                 height=120,
             )
-            entry["metric"] = st.text_input(
-                f"{label}｜重視するKPI・数値目標",
-                value=str(entry.get("metric", "")),
-                placeholder=str(guide.get("metric", "")),
-                help="具体的な数値（例：解約率5%、月間リード120件など）を入れると提案が精緻になります。",
+            customer_state["segments"] = st.text_area(
+                "顧客セグメント",
+                value=str(customer_state.get("segments", "")),
+                placeholder=MARKETING_CUSTOMER_PLACEHOLDER["segments"],
+                height=120,
             )
-            if key == "price":
-                try:
-                    current_price = float(entry.get("price_point", 0.0) or 0.0)
-                except (TypeError, ValueError):
-                    current_price = 0.0
-                entry["price_point"] = st.number_input(
-                    "自社の主要プラン価格（円・税込/税抜いずれでも可）",
-                    min_value=0.0,
-                    value=current_price,
-                    step=100.0,
-                    help="平均的な契約金額や代表的なプラン価格を入力してください。",
-                )
-
-    st.markdown("##### Customer（市場・顧客）")
-    customer_state = marketing_state.get("customer", {})
-    customer_cols = st.columns(2)
-    with customer_cols[0]:
-        try:
-            market_size_value = float(customer_state.get("market_size", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            market_size_value = 0.0
-        customer_state["market_size"] = st.number_input(
-            "市場規模（円や想定ユーザー数）",
-            min_value=0.0,
-            value=market_size_value,
-            step=1000.0,
-            help="単位は自由です。例：1200000000（円）や2000（社）。",
-        )
-        try:
-            growth_value = float(customer_state.get("growth_rate", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            growth_value = 0.0
-        customer_state["growth_rate"] = st.number_input(
-            "年成長率（%）",
-            min_value=-100.0,
-            max_value=500.0,
-            value=growth_value,
-            step=1.0,
-        )
-    with customer_cols[1]:
-        customer_state["needs"] = st.text_area(
-            "主要ニーズ・顧客課題",
-            value=str(customer_state.get("needs", "")),
-            placeholder=MARKETING_CUSTOMER_PLACEHOLDER["needs"],
-            height=120,
-        )
-        customer_state["segments"] = st.text_area(
-            "顧客セグメント",
-            value=str(customer_state.get("segments", "")),
-            placeholder=MARKETING_CUSTOMER_PLACEHOLDER["segments"],
-            height=120,
-        )
-    customer_state["persona"] = st.text_area(
-        "ターゲット顧客ペルソナ",
-        value=str(customer_state.get("persona", "")),
-        placeholder=MARKETING_CUSTOMER_PLACEHOLDER["persona"],
-        height=110,
-    )
-
-    st.markdown("##### Company（自社の整理）")
-    company_state = marketing_state.get("company", {})
-    company_cols = st.columns(2)
-    with company_cols[0]:
-        company_state["strengths"] = st.text_area(
-            "自社の強み",
-            value=str(company_state.get("strengths", "")),
-            placeholder=MARKETING_COMPANY_PLACEHOLDER["strengths"],
-            height=120,
-        )
-        company_state["resources"] = st.text_area(
-            "差別化リソース・提供体制",
-            value=str(company_state.get("resources", "")),
-            placeholder=MARKETING_COMPANY_PLACEHOLDER["resources"],
-            height=120,
-        )
-    with company_cols[1]:
-        company_state["weaknesses"] = st.text_area(
-            "弱み・制約",
-            value=str(company_state.get("weaknesses", "")),
-            placeholder=MARKETING_COMPANY_PLACEHOLDER["weaknesses"],
-            height=120,
-        )
-        try:
-            service_score_value = float(company_state.get("service_score", 3.0) or 3.0)
-        except (TypeError, ValueError):
-            service_score_value = 3.0
-        company_state["service_score"] = st.number_input(
-            "自社サービス差別化スコア (1-5)",
-            min_value=1.0,
-            max_value=5.0,
-            value=service_score_value,
-            step=0.1,
-            help="顧客体験・サポート品質などを1（低い）〜5（高い）で主観評価します。",
+        customer_state["persona"] = st.text_area(
+            "ターゲット顧客ペルソナ",
+            value=str(customer_state.get("persona", "")),
+            placeholder=MARKETING_CUSTOMER_PLACEHOLDER["persona"],
+            height=110,
         )
 
-    st.markdown("##### Competitor（競合比較）")
-    st.caption(MARKETING_COMPETITOR_HELP)
-    competitor_state = marketing_state.get("competitor", {})
-    competitor_cols = st.columns(2)
-    top_state = competitor_state.get("top", {})
-    local_state = competitor_state.get("local", {})
-    with competitor_cols[0]:
-        st.markdown("###### 業界トップ企業")
-        top_state["name"] = st.text_input("企業名", value=str(top_state.get("name", "")))
-        try:
-            top_price_value = float(top_state.get("price", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            top_price_value = 0.0
-        top_state["price"] = st.number_input(
-            "平均価格（円）",
-            min_value=0.0,
-            value=top_price_value,
-            step=1000.0,
-        )
-        try:
-            top_service_value = float(top_state.get("service_score", 3.0) or 3.0)
-        except (TypeError, ValueError):
-            top_service_value = 3.0
-        top_state["service_score"] = st.number_input(
+        st.markdown("#### Company（自社の整理）")
+        company_state = marketing_state.get("company", {})
+        company_cols = st.columns(2, gap="large")
+        with company_cols[0]:
+            company_state["strengths"] = st.text_area(
+                "強み・差別化資源",
+                value=str(company_state.get("strengths", "")),
+                placeholder=MARKETING_COMPANY_PLACEHOLDER["strengths"],
+                height=120,
+            )
+            company_state["resources"] = st.text_area(
+                "活用できるリソース",
+                value=str(company_state.get("resources", "")),
+                placeholder=MARKETING_COMPANY_PLACEHOLDER["resources"],
+                height=110,
+            )
+        with company_cols[1]:
+            company_state["weaknesses"] = st.text_area(
+                "弱み・制約",
+                value=str(company_state.get("weaknesses", "")),
+                placeholder=MARKETING_COMPANY_PLACEHOLDER["weaknesses"],
+                height=120,
+            )
+            company_state["opportunities"] = st.text_area(
+                "想定する機会",
+                value=str(company_state.get("opportunities", "")),
+                height=110,
+            )
+
+        st.markdown("#### Competitor（競合分析）")
+        competitor_state = marketing_state.get("competitor", {})
+        competitor_cols = st.columns(2, gap="large")
+        with competitor_cols[0]:
+            competitor_state["global_player"] = st.text_area(
+                "主要競合（全国・グローバル）",
+                value=str(competitor_state.get("global_player", "")),
+                height=110,
+                help="例：世界シェア上位企業の価格や機能。",
+            )
+            try:
+                global_price_value = float(competitor_state.get("global_price", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                global_price_value = 0.0
+            competitor_state["global_price"] = st.number_input(
+                "平均価格 (全国・グローバル)",
+                min_value=0.0,
+                value=global_price_value,
+                step=100.0,
+            )
+            competitor_state["differentiators_global"] = st.text_area(
+                "差別化ポイント (全国・グローバル)",
+                value=str(competitor_state.get("differentiators_global", "")),
+                height=110,
+            )
+        with competitor_cols[1]:
+            competitor_state["local_player"] = st.text_area(
+                "地域競合・代替手段",
+                value=str(competitor_state.get("local_player", "")),
+                height=110,
+                help="地域で比較される競合や代替サービスを入力します。",
+            )
+            try:
+                local_price_value = float(competitor_state.get("local_price", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                local_price_value = 0.0
+            competitor_state["local_price"] = st.number_input(
+                "平均価格 (地元)",
+                min_value=0.0,
+                value=local_price_value,
+                step=100.0,
+            )
+            competitor_state["differentiators_local"] = st.text_area(
+                "差別化ポイント (地元)",
+                value=str(competitor_state.get("differentiators_local", "")),
+                height=110,
+            )
+
+        competitor_state["service_score"] = st.slider(
             "サービス差別化スコア (1-5)",
             min_value=1.0,
             max_value=5.0,
-            value=top_service_value,
+            value=float(competitor_state.get("service_score", 3.0) or 3.0),
             step=0.1,
         )
-        top_state["strengths"] = st.text_area(
-            "強み",
-            value=str(top_state.get("strengths", "")),
-            height=110,
-        )
-        top_state["weaknesses"] = st.text_area(
-            "弱み",
-            value=str(top_state.get("weaknesses", "")),
-            height=110,
-        )
-        top_state["differentiators"] = st.text_area(
-            "差別化ポイント（数値・指標）",
-            value=str(top_state.get("differentiators", "")),
-            height=90,
-            help="例：導入社数500社、稼働率99%、サポート拠点47都道府県など。",
-        )
-    with competitor_cols[1]:
-        st.markdown("###### 地元・ニッチ競合")
-        local_state["name"] = st.text_input("企業名 (地元)", value=str(local_state.get("name", "")))
-        try:
-            local_price_value = float(local_state.get("price", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            local_price_value = 0.0
-        local_state["price"] = st.number_input(
-            "平均価格（円） (地元)",
-            min_value=0.0,
-            value=local_price_value,
-            step=1000.0,
-        )
-        try:
-            local_service_value = float(local_state.get("service_score", 3.0) or 3.0)
-        except (TypeError, ValueError):
-            local_service_value = 3.0
-        local_state["service_score"] = st.number_input(
-            "サービス差別化スコア (1-5) (地元)",
-            min_value=1.0,
-            max_value=5.0,
-            value=local_service_value,
-            step=0.1,
-        )
-        local_state["strengths"] = st.text_area(
-            "強み (地元)",
-            value=str(local_state.get("strengths", "")),
-            height=110,
-        )
-        local_state["weaknesses"] = st.text_area(
-            "弱み (地元)",
-            value=str(local_state.get("weaknesses", "")),
-            height=110,
-        )
-        local_state["differentiators"] = st.text_area(
-            "差別化ポイント（数値・指標）(地元)",
-            value=str(local_state.get("differentiators", "")),
-            height=90,
-        )
 
-    recommendations = generate_marketing_recommendations(marketing_state, context_state)
-    st.markdown("##### 自動生成された提案")
-    st.caption("入力した4P/3C情報をもとに、強化策とポジショニングのヒントを提示します。")
+        recommendations = generate_marketing_recommendations(marketing_state, context_state)
+        st.markdown("#### 自動生成された提案")
+        st.caption("入力した4P/3C情報をもとに、強化策とポジショニングのヒントを提示します。")
 
-    recommendation_cols = st.columns(2)
-    four_p_suggestions = recommendations.get("four_p", {})
-    with recommendation_cols[0]:
-        for key in FOUR_P_KEYS[:2]:
-            label = FOUR_P_LABELS[key]
-            st.markdown(f"**{label}の強化策**")
-            lines = four_p_suggestions.get(key, [])
-            if lines:
-                st.markdown("\n".join(f"- {line}" for line in lines))
-            else:
-                st.markdown("- 入力が不足しているため、提案を生成できません。")
-    with recommendation_cols[1]:
-        for key in FOUR_P_KEYS[2:]:
-            label = FOUR_P_LABELS[key]
-            st.markdown(f"**{label}の強化策**")
-            lines = four_p_suggestions.get(key, [])
-            if lines:
-                st.markdown("\n".join(f"- {line}" for line in lines))
-            else:
-                st.markdown("- 入力が不足しているため、提案を生成できません。")
+        recommendation_cols = st.columns(2, gap="large")
+        four_p_suggestions = recommendations.get("four_p", {})
+        with recommendation_cols[0]:
+            for key in FOUR_P_KEYS[:2]:
+                label = FOUR_P_LABELS[key]
+                st.markdown(f"**{label}の強化策**")
+                lines = four_p_suggestions.get(key, [])
+                if lines:
+                    st.markdown("
+".join(f"- {line}" for line in lines))
+                else:
+                    st.markdown("- 入力が不足しているため、提案を生成できません。")
+        with recommendation_cols[1]:
+            for key in FOUR_P_KEYS[2:]:
+                label = FOUR_P_LABELS[key]
+                st.markdown(f"**{label}の強化策**")
+                lines = four_p_suggestions.get(key, [])
+                if lines:
+                    st.markdown("
+".join(f"- {line}" for line in lines))
+                else:
+                    st.markdown("- 入力が不足しているため、提案を生成できません。")
 
-    st.markdown("**競合比較ハイライト**")
-    competitor_highlights = recommendations.get("competitor_highlights", [])
-    if competitor_highlights:
-        st.markdown("\n".join(f"- {item}" for item in competitor_highlights))
-    else:
-        st.markdown("- 競合データが未入力のため、差分分析が表示できません。")
+        st.markdown("**競合比較ハイライト**")
+        competitor_highlights = recommendations.get("competitor_highlights", [])
+        if competitor_highlights:
+            st.markdown("
+".join(f"- {item}" for item in competitor_highlights))
+        else:
+            st.markdown("- 競合データが未入力のため、差分分析が表示できません。")
 
-    st.markdown("**顧客価値提案 (UVP)**")
-    st.write(recommendations.get("uvp", ""))
-    st.markdown("**STP提案**")
-    st.markdown(
-        "\n".join(
-            [
-                f"- セグメンテーション: {recommendations.get('segmentation', '')}",
-                f"- ターゲティング: {recommendations.get('targeting', '')}",
-                f"- ポジショニング: {recommendations.get('positioning', '')}",
-            ]
+        st.markdown("**顧客価値提案 (UVP)**")
+        st.write(recommendations.get("uvp", ""))
+        st.markdown("**STP提案**")
+        st.markdown(
+            "
+".join(
+                [
+                    f"- セグメンテーション: {recommendations.get('segmentation', '')}",
+                    f"- ターゲティング: {recommendations.get('targeting', '')}",
+                    f"- ポジショニング: {recommendations.get('positioning', '')}",
+                ]
+            )
         )
-    )
-    positioning_points = recommendations.get("positioning_points", [])
-    if positioning_points:
-        st.markdown("\n".join(f"- {point}" for point in positioning_points))
+        positioning_points = recommendations.get("positioning_points", [])
+        if positioning_points:
+            st.markdown("
+".join(f"- {point}" for point in positioning_points))
 
-    competitor_table = recommendations.get("competitor_table", [])
-    if competitor_table:
-        competitor_df = pd.DataFrame(competitor_table)
-        st.dataframe(
-            competitor_df,
+        competitor_table = recommendations.get("competitor_table", [])
+        if competitor_table:
+            competitor_df = pd.DataFrame(competitor_table)
+            st.dataframe(
+                competitor_df,
+                hide_index=True,
+                **use_container_width_kwargs(st.dataframe),
+            )
+
+        marketing_state["four_p"] = four_p_state
+        marketing_state["customer"] = customer_state
+        marketing_state["company"] = company_state
+        marketing_state["competitor"] = competitor_state
+
+    with form_card(
+        title="戦略分析（SWOT / PEST）",
+        subtitle="内部リソースと外部環境をスコアリング",
+        icon="⚖",
+    ):
+        st.caption("強み・弱み・機会・脅威、および外部環境の変化を数値で可視化します。")
+        st.markdown("#### SWOT分析（内部・外部要因の整理）")
+        swot_editor_df = st.data_editor(
+            st.session_state.get("swot_editor_df", _swot_editor_dataframe_from_state([])),
+            num_rows="dynamic",
             hide_index=True,
-            **use_container_width_kwargs(st.dataframe),
+            column_config={
+                "分類": st.column_config.SelectboxColumn(
+                    "分類",
+                    options=list(SWOT_CATEGORY_OPTIONS),
+                    help="Strength/Weakness/Opportunity/Threatから選択します。",
+                ),
+                "要因": st.column_config.TextColumn(
+                    "要因",
+                    help="例：独自アルゴリズムによる高い技術力など。1行に1項目で記入します。",
+                ),
+                "重要度(1-5)": st.column_config.NumberColumn(
+                    "重要度 (1-5)",
+                    min_value=1.0,
+                    max_value=5.0,
+                    step=0.5,
+                    format="%.1f",
+                    help="経営インパクトの大きさを評価します。5が最大。",
+                ),
+                "確度(1-5)": st.column_config.NumberColumn(
+                    "確度 (1-5)",
+                    min_value=1.0,
+                    max_value=5.0,
+                    step=0.5,
+                    format="%.1f",
+                    help="発生・維持の確度を評価します。5が確実。",
+                ),
+                "備考": st.column_config.TextColumn(
+                    "備考",
+                    help="補足メモや根拠、関連する指標を記入できます。",
+                ),
+            },
+            key="swot_editor",
+            **use_container_width_kwargs(st.data_editor),
         )
+        st.session_state["swot_editor_df"] = swot_editor_df
 
-    st.markdown("#### SWOT分析（内部・外部要因の整理）")
-    st.caption("強み・弱み・機会・脅威を1〜5段階で評価し、優先度の高い論点を定量的に把握します。")
-    swot_editor_df = st.data_editor(
-        st.session_state.get("swot_editor_df", _swot_editor_dataframe_from_state([])),
-        num_rows="dynamic",
-        hide_index=True,
-        column_config={
-            "分類": st.column_config.SelectboxColumn(
-                "分類",
-                options=list(SWOT_CATEGORY_OPTIONS),
-                help="Strength/Weakness/Opportunity/Threatから選択します。",
-            ),
-            "要因": st.column_config.TextColumn(
-                "要因",
-                help="例：独自アルゴリズムによる高い技術力など。1行に1項目で記入します。",
-            ),
-            "重要度(1-5)": st.column_config.NumberColumn(
-                "重要度 (1-5)",
-                min_value=1.0,
-                max_value=5.0,
-                step=0.5,
-                format="%.1f",
-                help="経営インパクトの大きさを評価します。5が最大。",
-            ),
-            "確度(1-5)": st.column_config.NumberColumn(
-                "確度 (1-5)",
-                min_value=1.0,
-                max_value=5.0,
-                step=0.5,
-                format="%.1f",
-                help="発生・維持の確度を評価します。5が確実。",
-            ),
-            "備考": st.column_config.TextColumn(
-                "備考",
-                help="補足メモや根拠、関連する指標を記入できます。",
-            ),
-        },
-        key="swot_editor",
-        **use_container_width_kwargs(st.data_editor),
-    )
-    st.session_state["swot_editor_df"] = swot_editor_df
-
-    st.markdown("#### PEST分析（外部環境の変化）")
-    st.caption(
-        "政治(Political)・経済(Economic)・社会(Social)・技術(Technological)の外部要因と機会/脅威を評価します。"
-    )
-    pest_editor_df = st.data_editor(
-        st.session_state.get("pest_editor_df", _pest_editor_dataframe_from_state([])),
-        num_rows="dynamic",
-        hide_index=True,
-        column_config={
-            "区分": st.column_config.SelectboxColumn(
-                "区分",
-                options=list(PEST_DIMENSION_OPTIONS),
-                help="PESTの区分を選択します。",
-            ),
-            "要因": st.column_config.TextColumn(
-                "要因",
-                help="例：補助金制度の拡充、金利上昇、消費者価値観の変化など。",
-            ),
-            "影響方向": st.column_config.SelectboxColumn(
-                "影響方向",
-                options=list(PEST_DIRECTION_OPTIONS),
-                help="自社にとって機会か脅威かを選択します。",
-            ),
-            "影響度(1-5)": st.column_config.NumberColumn(
-                "影響度 (1-5)",
-                min_value=1.0,
-                max_value=5.0,
-                step=0.5,
-                format="%.1f",
-                help="ビジネスへの影響の大きさを評価します。",
-            ),
-            "確度(1-5)": st.column_config.NumberColumn(
-                "確度 (1-5)",
-                min_value=1.0,
-                max_value=5.0,
-                step=0.5,
-                format="%.1f",
-                help="要因が顕在化する確からしさを評価します。",
-            ),
-            "備考": st.column_config.TextColumn(
-                "備考",
-                help="情報源や想定シナリオなどを記載します。",
-            ),
-        },
-        key="pest_editor",
-        **use_container_width_kwargs(st.data_editor),
-    )
-    st.session_state["pest_editor_df"] = pest_editor_df
+        st.markdown("#### PEST分析（外部環境の変化）")
+        st.caption("政治・経済・社会・技術の観点から事業に影響する要因を洗い出します。")
+        pest_editor_df = st.data_editor(
+            st.session_state.get("pest_editor_df", _pest_editor_dataframe_from_state([])),
+            num_rows="dynamic",
+            hide_index=True,
+            column_config={
+                "区分": st.column_config.SelectboxColumn(
+                    "区分",
+                    options=list(PEST_DIMENSION_OPTIONS),
+                    help="PESTの区分を選択します。",
+                ),
+                "要因": st.column_config.TextColumn(
+                    "要因",
+                    help="例：補助金制度の拡充、金利上昇、消費者価値観の変化など。",
+                ),
+                "影響方向": st.column_config.SelectboxColumn(
+                    "影響方向",
+                    options=list(PEST_DIRECTION_OPTIONS),
+                    help="自社にとって機会か脅威かを選択します。",
+                ),
+                "影響度(1-5)": st.column_config.NumberColumn(
+                    "影響度 (1-5)",
+                    min_value=1.0,
+                    max_value=5.0,
+                    step=0.5,
+                    format="%.1f",
+                    help="ビジネスへの影響の大きさを評価します。",
+                ),
+                "確度(1-5)": st.column_config.NumberColumn(
+                    "確度 (1-5)",
+                    min_value=1.0,
+                    max_value=5.0,
+                    step=0.5,
+                    format="%.1f",
+                    help="要因が顕在化する確からしさを評価します。",
+                ),
+                "備考": st.column_config.TextColumn(
+                    "備考",
+                    help="情報源や想定シナリオなどを記載します。",
+                ),
+            },
+            key="pest_editor",
+            **use_container_width_kwargs(st.data_editor),
+        )
+        st.session_state["pest_editor_df"] = pest_editor_df
 
     current_analysis_state = dict(st.session_state.get(STRATEGIC_ANALYSIS_KEY, {}))
     current_analysis_state["swot"] = _records_from_swot_editor(swot_editor_df)
@@ -2535,402 +2751,483 @@ elif current_step == "sales":
         "顧客数×客単価×購入頻度の分解を意識し、季節性やプロモーション施策も織り込みましょう。"
     )
 
+    st.markdown(
+        """
+        <div class="formula-highlight" role="note">
+            <span class="formula-highlight__icon" aria-hidden="true">Σ</span>
+            <div class="formula-highlight__body">
+                <strong>売上の基本式</strong>
+                <p>月次売上 = 顧客数 × 客単価 × 購入頻度（月）。年間売上はさらに12か月分を積み上げます。</p>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with form_card(
+        title="クイック計算｜顧客 × 単価 × 購入頻度",
+        subtitle="Excelを開かなくても基本式から売上をシミュレーション",
+        icon="∑",
+    ):
+        calc_cols = st.columns(3, gap="large")
+        with calc_cols[0]:
+            quick_customers = st.number_input(
+                "想定顧客数（月間）",
+                min_value=0.0,
+                value=float(st.session_state.get("quick_calc_customers", 120.0)),
+                step=1.0,
+                key="quick_calc_customers",
+                help="月間で想定する顧客数を入力します。",
+            )
+        with calc_cols[1]:
+            quick_price = st.number_input(
+                "平均客単価（円）",
+                min_value=0.0,
+                value=float(st.session_state.get("quick_calc_price", 3500.0)),
+                step=100.0,
+                key="quick_calc_price",
+                help="税込の平均単価。カンマなしの半角数値で入力します。",
+            )
+        with calc_cols[2]:
+            quick_frequency = st.number_input(
+                "購入頻度（月）",
+                min_value=0.0,
+                value=float(st.session_state.get("quick_calc_frequency", 1.2)),
+                step=0.1,
+                key="quick_calc_frequency",
+                help="1か月あたりの購入・利用回数。サブスクは1.0が基準です。",
+            )
+
+        monthly_revenue = Decimal(str(quick_customers)) * Decimal(str(quick_price)) * Decimal(str(quick_frequency))
+        annual_revenue = monthly_revenue * Decimal("12")
+        results_cols = st.columns(2, gap="large")
+        with results_cols[0]:
+            st.metric(
+                f"月次売上（単位: {unit}）",
+                format_amount_with_unit(monthly_revenue, unit),
+            )
+            st.caption(f"= {format_amount_with_unit(monthly_revenue, '円')}")
+        with results_cols[1]:
+            st.metric(
+                f"年間売上（単位: {unit}）",
+                format_amount_with_unit(annual_revenue, unit),
+            )
+            st.caption(f"= {format_amount_with_unit(annual_revenue, '円')}")
+        st.caption("※ 計算結果をテンプレートの初期値やFermi推定の前提に活用できます。")
+
     main_col, guide_col = st.columns([4, 1], gap="large")
 
     with main_col:
-        _render_fermi_wizard(sales_df, unit)
-        st.markdown("#### 業種テンプレート & オプション")
-        template_options = ["—"] + list(INDUSTRY_TEMPLATES.keys())
-        stored_template_key = str(st.session_state.get(INDUSTRY_TEMPLATE_KEY, ""))
-        try:
-            default_index = template_options.index(stored_template_key if stored_template_key else "—")
-        except ValueError:
-            default_index = 0
+        with form_card(
+            title="フェルミ推定とテンプレート管理",
+            subtitle="推定結果を売上テンプレートに落とし込み、前提を可視化",
+            icon="🧮",
+        ):
+            _render_fermi_wizard(sales_df, unit)
+                                st.markdown("#### 業種テンプレート & オプション")
+                                template_options = ["—"] + list(INDUSTRY_TEMPLATES.keys())
+                                stored_template_key = str(st.session_state.get(INDUSTRY_TEMPLATE_KEY, ""))
+                                try:
+                                    default_index = template_options.index(stored_template_key if stored_template_key else "—")
+                                except ValueError:
+                                    default_index = 0
 
-        template_cols = st.columns([2.5, 1.5])
-        with template_cols[0]:
-            selected_template_key = st.selectbox(
-                "業種テンプレート",
-                options=template_options,
-                index=default_index,
-                format_func=lambda key: (
-                    "— 業種を選択 —"
-                    if key == "—"
-                    else INDUSTRY_TEMPLATES[key].label
-                ),
-                help="Fermi推定に基づく標準客数・単価・原価率を自動設定します。",
-            )
-            if selected_template_key != "—":
-                template = INDUSTRY_TEMPLATES[selected_template_key]
-                st.caption(template.description)
-                with st.expander("テンプレートの前提を確認", expanded=False):
-                    st.markdown(
-                        "- 変動費率: "
-                        + "、".join(
-                            f"{code} {ratio:.1%}" for code, ratio in template.variable_ratios.items()
-                        )
-                    )
-                    st.markdown(
-                        "- 固定費 (月次換算): "
-                        + "、".join(
-                            f"{code} {format_amount_with_unit(Decimal(str(amount)) / Decimal('12'), '円')}"
-                            for code, amount in template.fixed_costs.items()
-                        )
-                    )
-                    st.markdown(
-                        "- 運転資本想定 (回転日数): 売掛 {receivable:.0f}日 / 棚卸 {inventory:.0f}日 / 買掛 {payable:.0f}日".format(
-                            receivable=template.working_capital.get("receivable_days", 45.0),
-                            inventory=template.working_capital.get("inventory_days", 30.0),
-                            payable=template.working_capital.get("payable_days", 25.0),
-                        )
-                    )
-                    if template.custom_metrics:
-                        st.markdown(
-                            "- 業種特有KPI候補: "
-                            + "、".join(template.custom_metrics.keys())
-                        )
-            else:
-                template = None
-        with template_cols[1]:
-            st.write("")
-            if st.button(
-                "業種テンプレートを適用",
-                type="secondary",
-                **use_container_width_kwargs(st.button),
-            ):
-                if selected_template_key == "—":
-                    st.warning("適用する業種を選択してください。")
-                else:
-                    _apply_industry_template(selected_template_key, unit_factor)
-        if selected_template_key != "—":
-            st.session_state[INDUSTRY_TEMPLATE_KEY] = selected_template_key
-
-        control_cols = st.columns([1.2, 1.8, 1], gap="medium")
-        with control_cols[0]:
-            if st.button(
-                "チャネル追加",
-                key="add_channel_button",
-                **use_container_width_kwargs(st.button),
-            ):
-                next_channel_idx = int(st.session_state.get(SALES_CHANNEL_COUNTER_KEY, 1))
-                next_product_idx = int(st.session_state.get(SALES_PRODUCT_COUNTER_KEY, 1))
-                new_row = {
-                    "チャネル": f"新チャネル{next_channel_idx}",
-                    "商品": f"新商品{next_product_idx}",
-                    "想定顧客数": 0.0,
-                    "客単価": 0.0,
-                    "購入頻度(月)": 1.0,
-                    "メモ": "",
-                    **{month: 0.0 for month in MONTH_COLUMNS},
-                }
-                st.session_state[SALES_CHANNEL_COUNTER_KEY] = next_channel_idx + 1
-                st.session_state[SALES_PRODUCT_COUNTER_KEY] = next_product_idx + 1
-                updated = pd.concat([sales_df, pd.DataFrame([new_row])], ignore_index=True)
-                st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(updated)
-                st.toast("新しいチャネル行を追加しました。", icon="＋")
-
-        channel_options = [str(ch) for ch in sales_df["チャネル"].tolist() if str(ch).strip()]
-        if not channel_options:
-            channel_options = [f"新チャネル{int(st.session_state.get(SALES_CHANNEL_COUNTER_KEY, 1))}"]
-        with control_cols[1]:
-            selected_channel = st.selectbox(
-                "商品追加先チャネル",
-                options=channel_options,
-                key="product_channel_select",
-                help="商品を追加するチャネルを選択します。",
-            )
-        with control_cols[2]:
-            if st.button(
-                "商品追加",
-                key="add_product_button",
-                **use_container_width_kwargs(st.button),
-            ):
-                next_product_idx = int(st.session_state.get(SALES_PRODUCT_COUNTER_KEY, 1))
-                target_channel = selected_channel or channel_options[0]
-                new_row = {
-                    "チャネル": target_channel,
-                    "商品": f"新商品{next_product_idx}",
-                    "想定顧客数": 0.0,
-                    "客単価": 0.0,
-                    "購入頻度(月)": 1.0,
-                    "メモ": "",
-                    **{month: 0.0 for month in MONTH_COLUMNS},
-                }
-                st.session_state[SALES_PRODUCT_COUNTER_KEY] = next_product_idx + 1
-                updated = pd.concat([sales_df, pd.DataFrame([new_row])], ignore_index=True)
-                st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(updated)
-                st.toast("選択したチャネルに商品行を追加しました。", icon="新")
-
-        sales_df = st.session_state[SALES_TEMPLATE_STATE_KEY]
-        month_columns_config = {
-        month: st.column_config.NumberColumn(
-            month,
-            min_value=0.0,
-            step=1.0,
-            format="%.0f",
-            help=f"月別の売上金額を入力します（単位：{unit}）。",
-        )
-        for month in MONTH_COLUMNS
-    }
-        guidance_col, preview_col = st.columns([2.6, 1.4], gap="large")
-        with guidance_col:
-            st.markdown("##### テンプレートの使い方")
-            st.markdown(
-                "\n".join(
-                    f"- **{column}**：{description}"
-                    for column, description in TEMPLATE_COLUMN_GUIDE
-                )
-            )
-            st.caption("※ CSV/Excelでダウンロードしたテンプレートを編集し、そのままアップロードできます。")
-            st.caption("※ アップロード時に必須列の欠損と数値形式を自動チェックします。")
-            download_cols = st.columns(2)
-            with download_cols[0]:
-                st.download_button(
-                    "CSVテンプレートDL",
-                    data=_sales_template_to_csv(sales_df),
-                    file_name="sales_template.csv",
-                    mime="text/csv",
-                    **use_container_width_kwargs(st.download_button),
-                )
-            with download_cols[1]:
-                st.download_button(
-                    "ExcelテンプレートDL",
-                    data=_sales_template_to_excel(sales_df),
-                    file_name="sales_template.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    **use_container_width_kwargs(st.download_button),
-                )
-            with st.form("sales_template_form"):
-                uploaded_template = st.file_uploader(
-                    "テンプレートをアップロード (最大5MB)",
-                    type=["csv", "xlsx"],
-                    accept_multiple_files=False,
-                    help="ダウンロードしたテンプレートと同じ列構成でアップロードしてください。",
-                )
-                edited_df = st.data_editor(
-                    sales_df,
-                    num_rows="dynamic",
-                    **use_container_width_kwargs(st.data_editor),
-                    hide_index=True,
-                    column_config={
-                        "チャネル": st.column_config.TextColumn(
-                            "チャネル", max_chars=40, help="販売経路（例：自社EC、店舗など）"
-                        ),
-                        "商品": st.column_config.TextColumn(
-                            "商品", max_chars=40, help="商品・サービス名を入力します。"
-                        ),
-                        "想定顧客数": st.column_config.NumberColumn(
-                            "想定顧客数", min_value=0.0, step=1.0, format="%d", help="月間で想定する顧客数。Fermi推定の起点となります。"
-                        ),
-                        "客単価": st.column_config.NumberColumn(
-                            "客単価", min_value=0.0, step=100.0, format="%.0f", help="平均客単価。販促シナリオの前提になります。（単位：円）"
-                        ),
-                        "購入頻度(月)": st.column_config.NumberColumn(
-                            "購入頻度(月)",
-                            min_value=0.0,
-                            step=0.1,
-                            format="%.1f",
-                            help="1ヶ月あたりの購入・利用回数。サブスクの場合は1.0を基準にします。",
-                        ),
-                        "メモ": st.column_config.TextColumn(
-                            "メモ", max_chars=80, help="チャネル戦略や前提条件を記録します。"
-                        ),
-                        **month_columns_config,
-                    },
-                    key="sales_editor",
-                )
-                submit_kwargs = use_container_width_kwargs(st.form_submit_button)
-                if st.form_submit_button("テンプレートを反映", **submit_kwargs):
-                    try:
-                        with st.spinner("テンプレートを反映しています..."):
-                            if uploaded_template is not None:
-                                loaded_df = _load_sales_template_from_upload(uploaded_template)
-                                if loaded_df is not None:
-                                    st.session_state[SALES_TEMPLATE_STATE_KEY] = loaded_df
-                                    st.success("アップロードしたテンプレートを適用しました。")
-                            else:
-                                edited_frame = pd.DataFrame(edited_df)
-                                issues = _validate_sales_template(edited_frame)
-                                if issues:
-                                    for issue in issues:
-                                        st.error(issue)
-                                else:
-                                    st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(
-                                        edited_frame
+                                template_cols = st.columns([2.5, 1.5])
+                                with template_cols[0]:
+                                    selected_template_key = st.selectbox(
+                                        "業種テンプレート",
+                                        options=template_options,
+                                        index=default_index,
+                                        format_func=lambda key: (
+                                            "— 業種を選択 —"
+                                            if key == "—"
+                                            else INDUSTRY_TEMPLATES[key].label
+                                        ),
+                                        help="Fermi推定に基づく標準客数・単価・原価率を自動設定します。",
                                     )
-                                    st.success("エディタの内容をテンプレートに反映しました。")
-                    except Exception:
-                        st.error(
-                            "テンプレートの反映に失敗しました。列構成や数値を確認し、",
-                            "解決しない場合は support@keieiplan.jp までお問い合わせください。",
-                        )
-        with preview_col:
-            st.caption("テンプレートサンプル（1行のイメージ）")
-            st.dataframe(
-                _template_preview_dataframe(),
-                hide_index=True,
-                **use_container_width_kwargs(st.dataframe),
-            )
-        sales_df = st.session_state[SALES_TEMPLATE_STATE_KEY]
-        with st.expander("外部データ連携・インポート", expanded=False):
-            st.markdown(
-                "会計ソフトやPOSから出力したCSV/Excelをアップロードすると、"
-                "月次の実績データを自動集計し、予実分析やテンプレート更新に利用できます。"
-            )
-            source_type = st.selectbox(
-                "データソース", ["会計ソフト", "POS", "銀行口座CSV", "その他"], key="external_source_type"
-            )
-            uploaded_external = st.file_uploader(
-                "CSV / Excelファイル", type=["csv", "xlsx"], key="external_import_file"
-            )
-            external_df: pd.DataFrame | None = None
-            if uploaded_external is not None:
-                try:
-                    if uploaded_external.name.lower().endswith(".xlsx"):
-                        external_df = pd.read_excel(uploaded_external)
-                    else:
-                        external_df = pd.read_csv(uploaded_external)
-                except Exception:
-                    external_df = None
-                    st.error("ファイルの読み込みに失敗しました。列構成を確認してください。")
+                                    if selected_template_key != "—":
+                                        template = INDUSTRY_TEMPLATES[selected_template_key]
+                                        st.caption(template.description)
+                                        with st.expander("テンプレートの前提を確認", expanded=False):
+                                            st.markdown(
+                                                "- 変動費率: "
+                                                + "、".join(
+                                                    f"{code} {ratio:.1%}" for code, ratio in template.variable_ratios.items()
+                                                )
+                                            )
+                                            st.markdown(
+                                                "- 固定費 (月次換算): "
+                                                + "、".join(
+                                                    f"{code} {format_amount_with_unit(Decimal(str(amount)) / Decimal('12'), '円')}"
+                                                    for code, amount in template.fixed_costs.items()
+                                                )
+                                            )
+                                            st.markdown(
+                                                "- 運転資本想定 (回転日数): 売掛 {receivable:.0f}日 / 棚卸 {inventory:.0f}日 / 買掛 {payable:.0f}日".format(
+                                                    receivable=template.working_capital.get("receivable_days", 45.0),
+                                                    inventory=template.working_capital.get("inventory_days", 30.0),
+                                                    payable=template.working_capital.get("payable_days", 25.0),
+                                                )
+                                            )
+                                            if template.custom_metrics:
+                                                st.markdown(
+                                                    "- 業種特有KPI候補: "
+                                                    + "、".join(template.custom_metrics.keys())
+                                                )
+                                    else:
+                                        template = None
+                                with template_cols[1]:
+                                    st.write("")
+                                    if st.button(
+                                        "業種テンプレートを適用",
+                                        type="secondary",
+                                        **use_container_width_kwargs(st.button),
+                                    ):
+                                        if selected_template_key == "—":
+                                            st.warning("適用する業種を選択してください。")
+                                        else:
+                                            _apply_industry_template(selected_template_key, unit_factor)
+                                if selected_template_key != "—":
+                                    st.session_state[INDUSTRY_TEMPLATE_KEY] = selected_template_key
 
-            if external_df is not None and not external_df.empty:
-                st.dataframe(
-                    external_df.head(20),
-                    hide_index=True,
-                    **use_container_width_kwargs(st.dataframe),
-                )
-                columns = list(external_df.columns)
-                date_col = st.selectbox("日付列", columns, key="external_date_col")
-                amount_col = st.selectbox("金額列", columns, key="external_amount_col")
-                category_options = ["指定しない", *columns]
-                category_col = st.selectbox(
-                    "区分列 (任意)", category_options, index=0, key="external_category_col"
-                )
-                target_metric = st.selectbox(
-                    "取り込み先", ["売上", "変動費", "固定費"], key="external_target_metric"
-                )
+                                control_cols = st.columns([1.2, 1.8, 1], gap="medium")
+                                with control_cols[0]:
+                                    if st.button(
+                                        "チャネル追加",
+                                        key="add_channel_button",
+                                        **use_container_width_kwargs(st.button),
+                                    ):
+                                        next_channel_idx = int(st.session_state.get(SALES_CHANNEL_COUNTER_KEY, 1))
+                                        next_product_idx = int(st.session_state.get(SALES_PRODUCT_COUNTER_KEY, 1))
+                                        new_row = {
+                                            "チャネル": f"新チャネル{next_channel_idx}",
+                                            "商品": f"新商品{next_product_idx}",
+                                            "想定顧客数": 0.0,
+                                            "客単価": 0.0,
+                                            "購入頻度(月)": 1.0,
+                                            "メモ": "",
+                                            **{month: 0.0 for month in MONTH_COLUMNS},
+                                        }
+                                        st.session_state[SALES_CHANNEL_COUNTER_KEY] = next_channel_idx + 1
+                                        st.session_state[SALES_PRODUCT_COUNTER_KEY] = next_product_idx + 1
+                                        updated = pd.concat([sales_df, pd.DataFrame([new_row])], ignore_index=True)
+                                        st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(updated)
+                                        st.toast("新しいチャネル行を追加しました。", icon="＋")
 
-                working_df = external_df[[date_col, amount_col]].copy()
-                working_df["__date"] = pd.to_datetime(working_df[date_col], errors="coerce")
-                working_df["__amount"] = pd.to_numeric(working_df[amount_col], errors="coerce")
-                if category_col != "指定しない":
-                    working_df["__category"] = external_df[category_col].astype(str)
-                    categories = (
-                        working_df["__category"].dropna().unique().tolist()
-                        if not working_df["__category"].dropna().empty
-                        else []
-                    )
-                    selected_categories = st.multiselect(
-                        "対象カテゴリ", categories, default=categories, key="external_category_filter"
-                    )
-                    if selected_categories:
-                        working_df = working_df[working_df["__category"].isin(selected_categories)]
-                else:
-                    selected_categories = None
+                                channel_options = [str(ch) for ch in sales_df["チャネル"].tolist() if str(ch).strip()]
+                                if not channel_options:
+                                    channel_options = [f"新チャネル{int(st.session_state.get(SALES_CHANNEL_COUNTER_KEY, 1))}"]
+                                with control_cols[1]:
+                                    selected_channel = st.selectbox(
+                                        "商品追加先チャネル",
+                                        options=channel_options,
+                                        key="product_channel_select",
+                                        help="商品を追加するチャネルを選択します。",
+                                    )
+                                with control_cols[2]:
+                                    if st.button(
+                                        "商品追加",
+                                        key="add_product_button",
+                                        **use_container_width_kwargs(st.button),
+                                    ):
+                                        next_product_idx = int(st.session_state.get(SALES_PRODUCT_COUNTER_KEY, 1))
+                                        target_channel = selected_channel or channel_options[0]
+                                        new_row = {
+                                            "チャネル": target_channel,
+                                            "商品": f"新商品{next_product_idx}",
+                                            "想定顧客数": 0.0,
+                                            "客単価": 0.0,
+                                            "購入頻度(月)": 1.0,
+                                            "メモ": "",
+                                            **{month: 0.0 for month in MONTH_COLUMNS},
+                                        }
+                                        st.session_state[SALES_PRODUCT_COUNTER_KEY] = next_product_idx + 1
+                                        updated = pd.concat([sales_df, pd.DataFrame([new_row])], ignore_index=True)
+                                        st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(updated)
+                                        st.toast("選択したチャネルに商品行を追加しました。", icon="新")
 
-                working_df = working_df.dropna(subset=["__date", "__amount"])
-                if working_df.empty:
-                    st.warning("有効な日付と金額の行が見つかりませんでした。")
-                else:
-                    working_df["__month"] = working_df["__date"].dt.month
-                    monthly_totals = working_df.groupby("__month")["__amount"].sum()
-                    monthly_map = {
-                        month: float(monthly_totals.get(month, 0.0)) for month in MONTH_SEQUENCE
-                    }
-                    monthly_table = pd.DataFrame(
-                        {
-                            "月": [f"{month}月" for month in MONTH_SEQUENCE],
-                            "金額": [monthly_map[month] for month in MONTH_SEQUENCE],
-                        }
-                    )
-                    st.dataframe(
-                        monthly_table,
-                        hide_index=True,
-                        **use_container_width_kwargs(st.dataframe),
-                    )
-                    total_amount = float(sum(monthly_map.values()))
-                    st.metric("年間合計", format_amount_with_unit(Decimal(str(total_amount)), "円"))
-
-                    apply_to_plan = False
-                    selected_fixed_code: str | None = None
-                    if target_metric == "固定費":
-                        apply_to_plan = st.checkbox(
-                            "平均月額を固定費に反映する", value=True, key="external_apply_fixed"
-                        )
-                        fixed_options = [code for code, _, _, _ in FIXED_COST_FIELDS]
-                        selected_fixed_code = st.selectbox(
-                            "反映先の固定費項目",
-                            fixed_options,
-                            format_func=lambda code: next(
-                                label
-                                for code_, label, _, _ in FIXED_COST_FIELDS
-                                if code_ == code
-                            ),
-                            key="external_fixed_code",
-                        )
-                    elif target_metric == "売上":
-                        apply_to_plan = st.checkbox(
-                            "テンプレートに売上行を追加", value=False, key="external_apply_sales"
-                        )
-                    else:
-                        st.caption("変動費は実績データとして保存し、分析ページで原価率を確認します。")
-
-                    if st.button("実績データを保存", key="external_import_apply"):
-                        actual_key_map = {
-                            "売上": "sales",
-                            "変動費": "variable_costs",
-                            "固定費": "fixed_costs",
-                        }
-                        actuals_state = st.session_state.get("external_actuals", {})
-                        actuals_state[actual_key_map[target_metric]] = {
-                            "monthly": monthly_map,
-                            "source": source_type,
-                            "file_name": getattr(uploaded_external, "name", ""),
-                            "category": selected_categories,
-                            "total": total_amount,
-                        }
-                        st.session_state["external_actuals"] = actuals_state
-
-                        plan_total_decimal = _calculate_sales_total(
-                            _standardize_sales_df(pd.DataFrame(st.session_state[SALES_TEMPLATE_STATE_KEY]))
-                        )
-                        _update_fermi_learning(plan_total_decimal, Decimal(str(total_amount)))
-
-                        if apply_to_plan and target_metric == "売上":
-                            new_row = {
-                                "チャネル": f"{source_type}連携",
-                                "商品": "外部実績",
-                                "想定顧客数": 0.0,
-                                "客単価": 0.0,
-                                "購入頻度(月)": 1.0,
-                                "メモ": "外部実績データ",
-                                **{f"月{month:02d}": monthly_map[month] for month in MONTH_COLUMNS},
+                                sales_df = st.session_state[SALES_TEMPLATE_STATE_KEY]
+                                month_columns_config = {
+                                month: st.column_config.NumberColumn(
+                                    month,
+                                    min_value=0.0,
+                                    step=1.0,
+                                    format="%.0f",
+                                    help=f"月別の売上金額を入力します（単位：{unit}）。",
+                                )
+                                for month in MONTH_COLUMNS
                             }
-                            updated = pd.concat(
-                                [st.session_state[SALES_TEMPLATE_STATE_KEY], pd.DataFrame([new_row])],
-                                ignore_index=True,
-                            )
-                            st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(updated)
-                            st.toast("外部データを売上テンプレートに追加しました。", icon="収")
-                        if apply_to_plan and target_metric == "固定費" and selected_fixed_code:
-                            monthly_average = Decimal(str(total_amount)) / Decimal(len(MONTH_SEQUENCE))
-                            st.session_state[f"fixed_cost_{selected_fixed_code}"] = float(
-                                monthly_average / (unit_factor or Decimal("1"))
-                            )
-                            st.toast("固定費を実績平均で更新しました。", icon="資")
-                        st.success("実績データを保存しました。分析ページで予実差異が表示されます。")
-            elif uploaded_external is not None:
-                st.warning("読み込めるデータがありません。サンプル行を確認してください。")
+                                guidance_col, preview_col = st.columns([2.6, 1.4], gap="large")
+                                with guidance_col:
+                                    st.markdown("##### テンプレートの使い方")
+                                    st.markdown(
+                                        "\n".join(
+                                            f"- **{column}**：{description}"
+                                            for column, description in TEMPLATE_COLUMN_GUIDE
+                                        )
+                                    )
+                                    st.caption("※ CSV/Excelでダウンロードしたテンプレートを編集し、そのままアップロードできます。")
+                                    st.caption("※ アップロード時に必須列の欠損と数値形式を自動チェックします。")
+                                    download_cols = st.columns(2)
+                                    with download_cols[0]:
+                                        st.download_button(
+                                            "CSVテンプレートDL",
+                                            data=_sales_template_to_csv(sales_df),
+                                            file_name="sales_template.csv",
+                                            mime="text/csv",
+                                            **use_container_width_kwargs(st.download_button),
+                                        )
+                                    with download_cols[1]:
+                                        st.download_button(
+                                            "ExcelテンプレートDL",
+                                            data=_sales_template_to_excel(sales_df),
+                                            file_name="sales_template.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            **use_container_width_kwargs(st.download_button),
+                                        )
+                                    with st.form("sales_template_form"):
+                                        uploaded_template = st.file_uploader(
+                                            "テンプレートをアップロード (最大5MB)",
+                                            type=["csv", "xlsx"],
+                                            accept_multiple_files=False,
+                                            help="ダウンロードしたテンプレートと同じ列構成でアップロードしてください。",
+                                        )
+                                        edited_df = st.data_editor(
+                                            sales_df,
+                                            num_rows="dynamic",
+                                            **use_container_width_kwargs(st.data_editor),
+                                            hide_index=True,
+                                            column_config={
+                                                "チャネル": st.column_config.TextColumn(
+                                                    "チャネル", max_chars=40, help="販売経路（例：自社EC、店舗など）"
+                                                ),
+                                                "商品": st.column_config.TextColumn(
+                                                    "商品", max_chars=40, help="商品・サービス名を入力します。"
+                                                ),
+                                                "想定顧客数": st.column_config.NumberColumn(
+                                                    "想定顧客数", min_value=0.0, step=1.0, format="%d", help="月間で想定する顧客数。Fermi推定の起点となります。"
+                                                ),
+                                                "客単価": st.column_config.NumberColumn(
+                                                    "客単価", min_value=0.0, step=100.0, format="%.0f", help="平均客単価。販促シナリオの前提になります。（単位：円）"
+                                                ),
+                                                "購入頻度(月)": st.column_config.NumberColumn(
+                                                    "購入頻度(月)",
+                                                    min_value=0.0,
+                                                    step=0.1,
+                                                    format="%.1f",
+                                                    help="1ヶ月あたりの購入・利用回数。サブスクの場合は1.0を基準にします。",
+                                                ),
+                                                "メモ": st.column_config.TextColumn(
+                                                    "メモ", max_chars=80, help="チャネル戦略や前提条件を記録します。"
+                                                ),
+                                                **month_columns_config,
+                                            },
+                                            key="sales_editor",
+                                        )
+                                        submit_kwargs = use_container_width_kwargs(st.form_submit_button)
+                                        if st.form_submit_button("テンプレートを反映", **submit_kwargs):
+                                            try:
+                                                with st.spinner("テンプレートを反映しています..."):
+                                                    if uploaded_template is not None:
+                                                        loaded_df = _load_sales_template_from_upload(uploaded_template)
+                                                        if loaded_df is not None:
+                                                            st.session_state[SALES_TEMPLATE_STATE_KEY] = loaded_df
+                                                            st.success("アップロードしたテンプレートを適用しました。")
+                                                    else:
+                                                        edited_frame = pd.DataFrame(edited_df)
+                                                        issues = _validate_sales_template(edited_frame)
+                                                        if issues:
+                                                            for issue in issues:
+                                                                st.error(issue)
+                                                        else:
+                                                            st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(
+                                                                edited_frame
+                                                            )
+                                                            st.success("エディタの内容をテンプレートに反映しました。")
+                                            except Exception:
+                                                st.error(
+                                                    "テンプレートの反映に失敗しました。列構成や数値を確認し、",
+                                                    "解決しない場合は support@keieiplan.jp までお問い合わせください。",
+                                                )
+                                with preview_col:
+                                    st.caption("テンプレートサンプル（1行のイメージ）")
+                                    st.dataframe(
+                                        _template_preview_dataframe(),
+                                        hide_index=True,
+                                        **use_container_width_kwargs(st.dataframe),
+                                    )
+                                sales_df = st.session_state[SALES_TEMPLATE_STATE_KEY]
+                                with st.expander("外部データ連携・インポート", expanded=False):
+                                    st.markdown(
+                                        "会計ソフトやPOSから出力したCSV/Excelをアップロードすると、"
+                                        "月次の実績データを自動集計し、予実分析やテンプレート更新に利用できます。"
+                                    )
+                                    source_type = st.selectbox(
+                                        "データソース", ["会計ソフト", "POS", "銀行口座CSV", "その他"], key="external_source_type"
+                                    )
+                                    uploaded_external = st.file_uploader(
+                                        "CSV / Excelファイル", type=["csv", "xlsx"], key="external_import_file"
+                                    )
+                                    external_df: pd.DataFrame | None = None
+                                    if uploaded_external is not None:
+                                        try:
+                                            if uploaded_external.name.lower().endswith(".xlsx"):
+                                                external_df = pd.read_excel(uploaded_external)
+                                            else:
+                                                external_df = pd.read_csv(uploaded_external)
+                                        except Exception:
+                                            external_df = None
+                                            st.error("ファイルの読み込みに失敗しました。列構成を確認してください。")
 
-        if any(err.field.startswith("sales") for err in validation_errors):
-            messages = "<br/>".join(
-                err.message for err in validation_errors if err.field.startswith("sales")
-            )
-            st.markdown(f"<div class='field-error'>{messages}</div>", unsafe_allow_html=True)
+                                    if external_df is not None and not external_df.empty:
+                                        st.dataframe(
+                                            external_df.head(20),
+                                            hide_index=True,
+                                            **use_container_width_kwargs(st.dataframe),
+                                        )
+                                        columns = list(external_df.columns)
+                                        date_col = st.selectbox("日付列", columns, key="external_date_col")
+                                        amount_col = st.selectbox("金額列", columns, key="external_amount_col")
+                                        category_options = ["指定しない", *columns]
+                                        category_col = st.selectbox(
+                                            "区分列 (任意)", category_options, index=0, key="external_category_col"
+                                        )
+                                        target_metric = st.selectbox(
+                                            "取り込み先", ["売上", "変動費", "固定費"], key="external_target_metric"
+                                        )
+
+                                        working_df = external_df[[date_col, amount_col]].copy()
+                                        working_df["__date"] = pd.to_datetime(working_df[date_col], errors="coerce")
+                                        working_df["__amount"] = pd.to_numeric(working_df[amount_col], errors="coerce")
+                                        if category_col != "指定しない":
+                                            working_df["__category"] = external_df[category_col].astype(str)
+                                            categories = (
+                                                working_df["__category"].dropna().unique().tolist()
+                                                if not working_df["__category"].dropna().empty
+                                                else []
+                                            )
+                                            selected_categories = st.multiselect(
+                                                "対象カテゴリ", categories, default=categories, key="external_category_filter"
+                                            )
+                                            if selected_categories:
+                                                working_df = working_df[working_df["__category"].isin(selected_categories)]
+                                        else:
+                                            selected_categories = None
+
+                                        working_df = working_df.dropna(subset=["__date", "__amount"])
+                                        if working_df.empty:
+                                            st.warning("有効な日付と金額の行が見つかりませんでした。")
+                                        else:
+                                            working_df["__month"] = working_df["__date"].dt.month
+                                            monthly_totals = working_df.groupby("__month")["__amount"].sum()
+                                            monthly_map = {
+                                                month: float(monthly_totals.get(month, 0.0)) for month in MONTH_SEQUENCE
+                                            }
+                                            monthly_table = pd.DataFrame(
+                                                {
+                                                    "月": [f"{month}月" for month in MONTH_SEQUENCE],
+                                                    "金額": [monthly_map[month] for month in MONTH_SEQUENCE],
+                                                }
+                                            )
+                                            st.dataframe(
+                                                monthly_table,
+                                                hide_index=True,
+                                                **use_container_width_kwargs(st.dataframe),
+                                            )
+                                            total_amount = float(sum(monthly_map.values()))
+                                            st.metric("年間合計", format_amount_with_unit(Decimal(str(total_amount)), "円"))
+
+                                            apply_to_plan = False
+                                            selected_fixed_code: str | None = None
+                                            if target_metric == "固定費":
+                                                apply_to_plan = st.checkbox(
+                                                    "平均月額を固定費に反映する", value=True, key="external_apply_fixed"
+                                                )
+                                                fixed_options = [code for code, _, _, _ in FIXED_COST_FIELDS]
+                                                selected_fixed_code = st.selectbox(
+                                                    "反映先の固定費項目",
+                                                    fixed_options,
+                                                    format_func=lambda code: next(
+                                                        label
+                                                        for code_, label, _, _ in FIXED_COST_FIELDS
+                                                        if code_ == code
+                                                    ),
+                                                    key="external_fixed_code",
+                                                )
+                                            elif target_metric == "売上":
+                                                apply_to_plan = st.checkbox(
+                                                    "テンプレートに売上行を追加", value=False, key="external_apply_sales"
+                                                )
+                                            else:
+                                                st.caption("変動費は実績データとして保存し、分析ページで原価率を確認します。")
+
+                                            if st.button("実績データを保存", key="external_import_apply"):
+                                                actual_key_map = {
+                                                    "売上": "sales",
+                                                    "変動費": "variable_costs",
+                                                    "固定費": "fixed_costs",
+                                                }
+                                                actuals_state = st.session_state.get("external_actuals", {})
+                                                actuals_state[actual_key_map[target_metric]] = {
+                                                    "monthly": monthly_map,
+                                                    "source": source_type,
+                                                    "file_name": getattr(uploaded_external, "name", ""),
+                                                    "category": selected_categories,
+                                                    "total": total_amount,
+                                                }
+                                                st.session_state["external_actuals"] = actuals_state
+
+                                                plan_total_decimal = _calculate_sales_total(
+                                                    _standardize_sales_df(pd.DataFrame(st.session_state[SALES_TEMPLATE_STATE_KEY]))
+                                                )
+                                                _update_fermi_learning(plan_total_decimal, Decimal(str(total_amount)))
+
+                                                if apply_to_plan and target_metric == "売上":
+                                                    new_row = {
+                                                        "チャネル": f"{source_type}連携",
+                                                        "商品": "外部実績",
+                                                        "想定顧客数": 0.0,
+                                                        "客単価": 0.0,
+                                                        "購入頻度(月)": 1.0,
+                                                        "メモ": "外部実績データ",
+                                                        **{f"月{month:02d}": monthly_map[month] for month in MONTH_COLUMNS},
+                                                    }
+                                                    updated = pd.concat(
+                                                        [st.session_state[SALES_TEMPLATE_STATE_KEY], pd.DataFrame([new_row])],
+                                                        ignore_index=True,
+                                                    )
+                                                    st.session_state[SALES_TEMPLATE_STATE_KEY] = _standardize_sales_df(updated)
+                                                    st.toast("外部データを売上テンプレートに追加しました。", icon="収")
+                                                if apply_to_plan and target_metric == "固定費" and selected_fixed_code:
+                                                    monthly_average = Decimal(str(total_amount)) / Decimal(len(MONTH_SEQUENCE))
+                                                    st.session_state[f"fixed_cost_{selected_fixed_code}"] = float(
+                                                        monthly_average / (unit_factor or Decimal("1"))
+                                                    )
+                                                    st.toast("固定費を実績平均で更新しました。", icon="資")
+                                                st.success("実績データを保存しました。分析ページで予実差異が表示されます。")
+                                    elif uploaded_external is not None:
+                                        st.warning("読み込めるデータがありません。サンプル行を確認してください。")
+
+                                if any(err.field.startswith("sales") for err in validation_errors):
+                                    messages = "<br/>".join(
+                                        err.message for err in validation_errors if err.field.startswith("sales")
+                                    )
+                                    st.markdown(f"<div class='field-error'>{messages}</div>", unsafe_allow_html=True)
 
     with guide_col:
-        _render_sales_guide_panel()
+        with form_card(
+            title="入力ガイド",
+            subtitle="テンプレート活用のチェックポイント",
+            icon="ℹ",
+        ):
+            _render_sales_guide_panel()
+        if contextual_nav_items:
+            with form_card(
+                title="関連ベンチマーク",
+                subtitle="入力した顧客セグメントに紐づく業界指標",
+                icon="✦",
+            ):
+                _render_contextual_hint_blocks(contextual_nav_items)
 
 elif current_step == "costs":
     _maybe_show_tutorial("costs", "原価率と固定費のレンジを設定し、利益感度を把握しましょう。")
