@@ -29,7 +29,7 @@ from models import (
     LoanSchedule,
     TaxPolicy,
 )
-from calc import compute, generate_cash_flow, plan_from_models
+from calc import compute, generate_cash_flow, plan_from_models, summarize_plan_metrics
 from pydantic import ValidationError
 from state import ensure_session_defaults
 from services import auth
@@ -104,6 +104,454 @@ TEMPLATE_COLUMN_GUIDE = [
     ),
     ("メモ", "任意の補足メモ。獲得施策や前提条件を記録できます。"),
 ]
+
+GLOSSARY_URL = "https://support.softkraft.co/keieiplan/glossary"
+DASHBOARD_DARK_BLUE = "#0B2545"
+DASHBOARD_LIGHT_BLUE = "#7CA8FF"
+
+BMC_SAMPLE_DIAGRAM_HTML = """
+<style>
+.bmc-mini-diagram {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.bmc-mini-diagram__cell {
+  border: 1px solid rgba(11, 37, 69, 0.25);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  background-color: rgba(124, 168, 255, 0.15);
+  font-size: 0.9rem;
+}
+.bmc-mini-diagram__title {
+  font-weight: 600;
+  color: #0B2545;
+  margin-bottom: 0.3rem;
+}
+</style>
+<div class="bmc-mini-diagram">
+  <div class="bmc-mini-diagram__cell">
+    <div class="bmc-mini-diagram__title">顧客セグメント</div>
+    <div>年商5〜20億円の中堅製造業｜生産管理・経営企画部門</div>
+  </div>
+  <div class="bmc-mini-diagram__cell">
+    <div class="bmc-mini-diagram__title">提供価値</div>
+    <div>在庫可視化ダッシュボードと需要予測AIで在庫回転日数を30%短縮</div>
+  </div>
+  <div class="bmc-mini-diagram__cell">
+    <div class="bmc-mini-diagram__title">チャネル</div>
+    <div>直販CSチーム｜製造業特化SIer｜業界ポータル広告</div>
+  </div>
+</div>
+"""
+
+THREE_C_FIELD_GUIDES = {
+    "three_c_customer": {
+        "title": "記入例を見る",
+        "example": (
+            "**サンプル：SmartFactoryクラウド**\n"
+            "- ターゲット：年商5〜20億円の金属加工メーカーの生産管理部門\n"
+            "- ペイン：在庫回転日数が45日を超え、現場判断が属人的"
+        ),
+        "best_practices": [
+            "顧客課題と意思決定者の職種をセットで書き出す",
+            "市場規模やKPIなど定量情報を1行添えて仮説精度を高める",
+        ],
+        "glossary_anchor": "three-c",
+    },
+    "three_c_company": {
+        "title": "記入例を見る",
+        "example": (
+            "**サンプル：SmartFactoryクラウド**\n"
+            "- 強み：製造業向けIoTの導入支援実績と専任CSチーム\n"
+            "- 差別化資源：需要予測アルゴリズムと現場改善コンサル"
+        ),
+        "best_practices": [
+            "強み・弱みをファクトベースで簡潔に記述する",
+            "活用できるリソースと不足リソースを対で整理する",
+        ],
+        "glossary_anchor": "three-c",
+    },
+    "three_c_competitor": {
+        "title": "記入例を見る",
+        "example": (
+            "**サンプル：SmartFactoryクラウド**\n"
+            "- グローバル競合：海外MESベンダー｜平均価格¥120万/年\n"
+            "- ローカル競合：地域SIer｜サポート即応性は高いが在庫分析機能が弱い"
+        ),
+        "best_practices": [
+            "価格・機能・サポート水準など比較軸を揃えて記述する",
+            "競合の強み/弱みを自社施策に転換できる形でメモする",
+        ],
+        "glossary_anchor": "three-c",
+    },
+}
+
+BMC_FIELD_GUIDES = {
+    "bmc_customer_segments": {
+        "title": "記入例を見る",
+        "example": (
+            "- 主要顧客：国内の中堅製造業（従業員50〜200名）\n"
+            "- サブセグメント：OEM生産工場、食品加工ライン"
+        ),
+        "diagram_html": BMC_SAMPLE_DIAGRAM_HTML,
+        "best_practices": [
+            "セグメントごとに購買意思決定者と利用部門を明記する",
+            "ペルソナのKPIや成功指標をメモして提案内容に反映する",
+        ],
+        "glossary_anchor": "business-model-canvas",
+    },
+    "bmc_value_proposition": {
+        "title": "記入例を見る",
+        "example": (
+            "- 提供価値：在庫差異の自動検知と需要予測により在庫回転日数を30%改善\n"
+            "- 成果：経営会議用のダッシュボードで意思決定を2週間高速化"
+        ),
+        "diagram_html": BMC_SAMPLE_DIAGRAM_HTML,
+        "best_practices": [
+            "顧客ジョブ・痛み・得られるメリットの三点で記載する",
+            "定量効果や導入期間を添えて説得力を高める",
+        ],
+        "glossary_anchor": "business-model-canvas",
+    },
+    "bmc_channels": {
+        "title": "記入例を見る",
+        "example": (
+            "- チャネル：直販営業、製造業専門SIer、業界ポータル広告\n"
+            "- 体制：インサイドセールス3名＋フィールドセールス2名でリード育成"
+        ),
+        "diagram_html": BMC_SAMPLE_DIAGRAM_HTML,
+        "best_practices": [
+            "獲得・育成・受注のファネルでチャネルを整理する",
+            "パートナー比率や契約サイクルなど運営上の指標も併記する",
+        ],
+        "glossary_anchor": "business-model-canvas",
+    },
+}
+
+QUALITATIVE_MEMO_GUIDE = {
+    "title": "ベストプラクティス",
+    "example": (
+        "- FY2025の重点KGI：ARR 12億円、営業利益率15%\n"
+        "- リスク：大型顧客の更新率、採用計画の遅延\n"
+        "- 対応策：Q2までにサクセス組織を5名に増強しオンボーディングを標準化"
+    ),
+    "best_practices": [
+        "数値計画の前提・リスクと緩和策をワンセットで記載する",
+        "会議体や承認者など意思決定プロセスもメモするとレビューが速い",
+    ],
+    "glossary_anchor": "business-plan",
+}
+
+
+def _decimal_from(value: object) -> Decimal:
+    """Convert an arbitrary value into :class:`Decimal`."""
+
+    try:
+        return Decimal(str(value))
+    except Exception:  # pragma: no cover - defensive parsing
+        return Decimal("0")
+
+
+def _render_field_guide_popover(
+    *,
+    key: str,
+    title: str,
+    example: str | None = None,
+    best_practices: List[str] | None = None,
+    glossary_anchor: str | None = None,
+    diagram_html: str | None = None,
+) -> None:
+    """Render a popover button that exposes examples and best practices."""
+
+    glossary_url = f"{GLOSSARY_URL}#{glossary_anchor}" if glossary_anchor else GLOSSARY_URL
+    with st.popover(f"📘 {title}", key=key, use_container_width=True):
+        if example:
+            st.markdown("**記入例**")
+            st.markdown(example)
+        if diagram_html:
+            st.markdown(diagram_html, unsafe_allow_html=True)
+        if best_practices:
+            st.markdown("**ベストプラクティス**")
+            st.markdown("\n".join(f"- {item}" for item in best_practices))
+        st.markdown(f"[ヘルプセンター用語集で詳細を見る]({glossary_url})")
+
+
+def _build_tax_payload_snapshot(defaults: Mapping[str, object]) -> Dict[str, Decimal]:
+    """Collect the current tax rates from session state with defaults."""
+
+    def _value(key: str, fallback: float | Decimal) -> Decimal:
+        state_value = st.session_state.get(key, fallback)
+        return Decimal(str(state_value if state_value is not None else fallback))
+
+    return {
+        "corporate_tax_rate": _value("tax_corporate_rate", defaults.get("corporate_tax_rate", 0.3)),
+        "business_tax_rate": _value("tax_business_rate", defaults.get("business_tax_rate", 0.05)),
+        "consumption_tax_rate": _value("tax_consumption_rate", defaults.get("consumption_tax_rate", 0.1)),
+        "dividend_payout_ratio": _value("tax_dividend_ratio", defaults.get("dividend_payout_ratio", 0.0)),
+    }
+
+
+def _compute_plan_preview(
+    bundle_payload: Dict[str, object],
+    settings_state: Mapping[str, object],
+    unit: str,
+):
+    """Validate payload and compute plan + cash-flow preview data."""
+
+    bundle, issues = validate_bundle(bundle_payload)
+    preview_amounts: Dict[str, Decimal] = {}
+    preview_cf: Dict[str, object] | None = None
+    if bundle and not issues:
+        fte_value = Decimal(str(settings_state.get("fte", 20)))
+        plan_preview = plan_from_models(
+            bundle.sales,
+            bundle.costs,
+            bundle.capex,
+            bundle.loans,
+            bundle.tax,
+            fte=fte_value,
+            unit=unit,
+        )
+        preview_amounts = compute(plan_preview)
+        preview_cf = generate_cash_flow(
+            preview_amounts,
+            bundle.capex,
+            bundle.loans,
+            bundle.tax,
+        )
+    return bundle, issues, preview_amounts, preview_cf
+
+
+def _pl_dashboard_dataframe(
+    amounts: Mapping[str, Decimal],
+    unit_factor: Decimal,
+    unit: str,
+) -> pd.DataFrame:
+    """Transform key P&L lines into a dataframe for visualisation."""
+
+    focus_codes = [
+        ("REV", "売上高", "利益・売上", 1),
+        ("COGS_TTL", "売上原価", "コスト", -1),
+        ("GROSS", "粗利", "利益・売上", 1),
+        ("OPEX_TTL", "販管費", "コスト", -1),
+        ("OP", "営業利益", "利益・売上", 1),
+        ("ORD", "経常利益", "利益・売上", 1),
+    ]
+    rows: List[Dict[str, object]] = []
+    divisor = unit_factor or Decimal("1")
+    for code, label, category, polarity in focus_codes:
+        raw_value = _decimal_from(amounts.get(code, Decimal("0")))
+        scaled = (raw_value * polarity) / divisor
+        rows.append(
+            {
+                "項目": label,
+                "金額": float(scaled),
+                "区分": category,
+                "表示金額": format_amount_with_unit(
+                    raw_value if polarity > 0 else -raw_value,
+                    unit,
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _cashflow_dashboard_dataframe(
+    cf_data: Mapping[str, object] | None,
+    unit_factor: Decimal,
+) -> pd.DataFrame:
+    """Prepare monthly cash-flow projection for charting."""
+
+    if not isinstance(cf_data, Mapping):
+        return pd.DataFrame()
+    metrics = cf_data.get("investment_metrics", {})
+    monthly = metrics.get("monthly_cash_flows") if isinstance(metrics, Mapping) else None
+    if not monthly:
+        return pd.DataFrame()
+    monthly_df = pd.DataFrame(monthly)
+    if monthly_df.empty:
+        return monthly_df
+    scaling = unit_factor or Decimal("1")
+    monthly_df["_month_index"] = monthly_df["month_index"].apply(lambda x: int(_decimal_from(x)))
+    monthly_df["期間"] = monthly_df.apply(
+        lambda row: "FY{year} M{month:02d}".format(
+            year=int(_decimal_from(row.get("year"))),
+            month=int(_decimal_from(row.get("month"))),
+        ),
+        axis=1,
+    )
+    monthly_df["純増減"] = monthly_df["net"].apply(
+        lambda x: float(_decimal_from(x) / scaling)
+    )
+    monthly_df["累積残高"] = monthly_df["cumulative"].apply(
+        lambda x: float(_decimal_from(x) / scaling)
+    )
+    return monthly_df[["期間", "_month_index", "純増減", "累積残高"]]
+
+
+def _render_financial_dashboard(
+    amounts: Mapping[str, Decimal] | None,
+    cf_data: Mapping[str, object] | None,
+    *,
+    unit: str,
+    unit_factor: Decimal,
+) -> None:
+    """Render KPI metrics and charts based on preview results."""
+
+    if not amounts:
+        return
+
+    st.markdown("#### リアルタイム財務ダッシュボード")
+    metrics = summarize_plan_metrics(amounts)
+    gross_margin = metrics.get("gross_margin") if isinstance(metrics, Mapping) else None
+    breakeven = metrics.get("breakeven") if isinstance(metrics, Mapping) else Decimal("0")
+
+    ord_profit = _decimal_from(amounts.get("ORD", Decimal("0")))
+    op_profit = _decimal_from(amounts.get("OP", Decimal("0")))
+    revenue = _decimal_from(amounts.get("REV", Decimal("0")))
+
+    cf_operating = _decimal_from(
+        cf_data.get("営業キャッシュフロー", Decimal("0")) if isinstance(cf_data, Mapping) else Decimal("0")
+    )
+    cf_net = _decimal_from(
+        cf_data.get("キャッシュ増減", Decimal("0")) if isinstance(cf_data, Mapping) else Decimal("0")
+    )
+
+    metric_cols = st.columns(3)
+    with metric_cols[0]:
+        st.metric("粗利率", format_ratio(gross_margin))
+    with metric_cols[1]:
+        st.metric("営業利益", format_amount_with_unit(op_profit, unit))
+    with metric_cols[2]:
+        st.metric("営業キャッシュフロー", format_amount_with_unit(cf_operating, unit))
+
+    metric_cols_second = st.columns(3)
+    with metric_cols_second[0]:
+        st.metric("損益分岐点売上高", format_amount_with_unit(_decimal_from(breakeven), unit))
+    with metric_cols_second[1]:
+        st.metric("経常利益", format_amount_with_unit(ord_profit, unit))
+    with metric_cols_second[2]:
+        st.metric("キャッシュ増減", format_amount_with_unit(cf_net, unit))
+
+    pl_df = _pl_dashboard_dataframe(amounts, unit_factor, unit)
+    if not pl_df.empty:
+        order = list(pl_df["項目"])
+        color_scale = alt.Scale(
+            domain=["利益・売上", "コスト"],
+            range=[DASHBOARD_DARK_BLUE, DASHBOARD_LIGHT_BLUE],
+        )
+        pl_chart = (
+            alt.Chart(pl_df)
+            .mark_bar(size=28, cornerRadiusEnd=4)
+            .encode(
+                x=alt.X("金額:Q", title=f"年間金額（{unit}換算）", axis=alt.Axis(format=",.1f")),
+                y=alt.Y("項目:N", sort=order),
+                color=alt.Color("区分:N", scale=color_scale, legend=alt.Legend(title="区分")),
+                tooltip=[
+                    alt.Tooltip("項目:N"),
+                    alt.Tooltip("区分:N"),
+                    alt.Tooltip("表示金額:N", title="金額"),
+                ],
+            )
+            .properties(height=260)
+        )
+        st.altair_chart(pl_chart, use_container_width=True)
+
+    cf_df = _cashflow_dashboard_dataframe(cf_data, unit_factor)
+    if not cf_df.empty:
+        horizon = min(24, len(cf_df))
+        display_df = cf_df.iloc[:horizon]
+        cumulative_chart = (
+            alt.Chart(display_df)
+            .mark_area(color=DASHBOARD_LIGHT_BLUE, opacity=0.55)
+            .encode(
+                x=alt.X(
+                    "期間:N",
+                    sort=alt.SortField(field="_month_index", order="ascending"),
+                    axis=alt.Axis(labelAngle=-45),
+                ),
+                y=alt.Y("累積残高:Q", title=f"累積キャッシュ（{unit}換算）"),
+                tooltip=[
+                    alt.Tooltip("期間:N"),
+                    alt.Tooltip("累積残高:Q", title="累積残高", format=",.1f"),
+                ],
+            )
+        )
+        cumulative_line = (
+            alt.Chart(display_df)
+            .mark_line(color=DASHBOARD_DARK_BLUE, strokeWidth=2)
+            .encode(
+                x=alt.X(
+                    "期間:N",
+                    sort=alt.SortField(field="_month_index", order="ascending"),
+                ),
+                y="累積残高:Q",
+            )
+        )
+        st.altair_chart(cumulative_chart + cumulative_line, use_container_width=True)
+
+        net_chart = (
+            alt.Chart(display_df)
+            .mark_bar(color=DASHBOARD_DARK_BLUE)
+            .encode(
+                x=alt.X(
+                    "期間:N",
+                    sort=alt.SortField(field="_month_index", order="ascending"),
+                    axis=alt.Axis(labelAngle=-45),
+                ),
+                y=alt.Y("純増減:Q", title=f"月次純増減（{unit}換算）"),
+                tooltip=[
+                    alt.Tooltip("期間:N"),
+                    alt.Tooltip("純増減:Q", title="純増減", format=",.1f"),
+                ],
+            )
+            .properties(height=220)
+        )
+        st.altair_chart(net_chart, use_container_width=True)
+        if len(cf_df) > horizon:
+            st.caption("※ 表示は直近24ヶ月まで。全期間はAnalysisタブで確認できます。")
+
+
+def _four_p_missing_message(key: str, entry: Mapping[str, object]) -> str:
+    """Return a guidance message when Four P suggestions cannot be generated."""
+
+    required_fields = ["current", "challenge", "metric"]
+    if key == "price":
+        required_fields.append("price_point")
+
+    missing_fields: List[str] = []
+    for field in required_fields:
+        if field == "price_point":
+            try:
+                number = float(entry.get(field, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                number = 0.0
+            if number <= 0:
+                missing_fields.append(field)
+        else:
+            if not str(entry.get(field, "")).strip():
+                missing_fields.append(field)
+
+    if not missing_fields:
+        return "- 記入内容を追加すると提案が再生成されます。"
+
+    guide = FOUR_P_INPUT_GUIDE.get(key, {}) if isinstance(FOUR_P_INPUT_GUIDE.get(key), Mapping) else {}
+    lines = ["- 入力が不足しています。以下を補足すると提案が生成されます:"]
+    for field in missing_fields:
+        label = FOUR_P_FIELD_LABELS.get(field, field)
+        if field == "price_point":
+            example = FOUR_P_PRICE_POINT_HINT
+        else:
+            example = guide.get(field)
+        if example:
+            lines.append(f"  - {label}（例：{example}）")
+        else:
+            lines.append(f"  - {label}を具体的に記入してください。")
+    lines.append(f"  - [ヘルプセンター用語集]({GLOSSARY_URL})で関連用語を確認")
+    return "\n".join(lines)
+
 SALES_TEMPLATE_STATE_KEY = "sales_template_df"
 SALES_CHANNEL_COUNTER_KEY = "sales_channel_counter"
 SALES_PRODUCT_COUNTER_KEY = "sales_product_counter"
@@ -303,6 +751,15 @@ FOUR_P_INPUT_GUIDE = {
     },
 }
 
+FOUR_P_FIELD_LABELS = {
+    "current": "現状",
+    "challenge": "課題",
+    "metric": "KPI",
+    "price_point": "価格帯",
+}
+
+FOUR_P_PRICE_POINT_HINT = "例：スタンダードプラン月額12,000円／アカウント"
+
 MARKETING_CUSTOMER_PLACEHOLDER = {
     "needs": "市場ニーズや顧客課題（例：属人的な在庫管理から脱却したい）",
     "segments": "顧客セグメント（例：年商5〜10億円の製造業、飲食チェーンなど）",
@@ -318,11 +775,6 @@ MARKETING_COMPANY_PLACEHOLDER = {
 MARKETING_COMPETITOR_HELP = (
     "業界トップ企業と地元企業を比較し、平均価格やサービス差別化ポイントを数値で入力し"
     "てください。サービス差別化スコアは1（低い）〜5（高い）で評価します。"
-)
-
-CUSTOMER_EXAMPLE_TEXT = (
-    "例：主要顧客やターゲット市場の概要｜年商5〜10億円規模の製造業の経営企画部門。"
-    "紙の在庫管理からDX移行を検討しており、月次で意思決定できるダッシュボードを求めている。"
 )
 
 BUSINESS_CONTEXT_SNAPSHOT_KEY = "business_context_snapshot"
@@ -2337,7 +2789,14 @@ if current_step == "context":
                 help="想定顧客層や顧客課題を記入してください。",
                 height=160,
             )
-            st.caption(CUSTOMER_EXAMPLE_TEXT)
+            guide = THREE_C_FIELD_GUIDES["three_c_customer"]
+            _render_field_guide_popover(
+                key="three_c_customer_popover",
+                title=guide["title"],
+                example=guide["example"],
+                best_practices=guide["best_practices"],
+                glossary_anchor=guide["glossary_anchor"],
+            )
         with three_c_cols[1]:
             context_state["three_c_company"] = st.text_area(
                 "Company（自社）",
@@ -2346,6 +2805,14 @@ if current_step == "context":
                 help="自社の強み・提供価値・リソースを整理しましょう。",
                 height=160,
             )
+            guide = THREE_C_FIELD_GUIDES["three_c_company"]
+            _render_field_guide_popover(
+                key="three_c_company_popover",
+                title=guide["title"],
+                example=guide["example"],
+                best_practices=guide["best_practices"],
+                glossary_anchor=guide["glossary_anchor"],
+            )
         with three_c_cols[2]:
             context_state["three_c_competitor"] = st.text_area(
                 "Competitor（競合）",
@@ -2353,6 +2820,14 @@ if current_step == "context":
                 placeholder=BUSINESS_CONTEXT_PLACEHOLDER["three_c_competitor"],
                 help="競合の特徴や比較したときの優位性・弱点を記入します。",
                 height=160,
+            )
+            guide = THREE_C_FIELD_GUIDES["three_c_competitor"]
+            _render_field_guide_popover(
+                key="three_c_competitor_popover",
+                title=guide["title"],
+                example=guide["example"],
+                best_practices=guide["best_practices"],
+                glossary_anchor=guide["glossary_anchor"],
             )
 
     with form_card(
@@ -2370,6 +2845,15 @@ if current_step == "context":
                 help="年齢・職種・企業規模など、ターゲット顧客の解像度を高めましょう。",
                 height=170,
             )
+            guide = BMC_FIELD_GUIDES["bmc_customer_segments"]
+            _render_field_guide_popover(
+                key="bmc_segments_popover",
+                title=guide["title"],
+                example=guide["example"],
+                best_practices=guide["best_practices"],
+                glossary_anchor=guide["glossary_anchor"],
+                diagram_html=guide.get("diagram_html"),
+            )
         with bmc_cols[1]:
             context_state["bmc_value_proposition"] = st.text_area(
                 "提供価値",
@@ -2377,6 +2861,15 @@ if current_step == "context":
                 placeholder=BUSINESS_CONTEXT_PLACEHOLDER["bmc_value_proposition"],
                 help="顧客課題をどのように解決するか、成功事例なども記載すると有効です。",
                 height=170,
+            )
+            guide = BMC_FIELD_GUIDES["bmc_value_proposition"]
+            _render_field_guide_popover(
+                key="bmc_value_popover",
+                title=guide["title"],
+                example=guide["example"],
+                best_practices=guide["best_practices"],
+                glossary_anchor=guide["glossary_anchor"],
+                diagram_html=guide.get("diagram_html"),
             )
         with bmc_cols[2]:
             context_state["bmc_channels"] = st.text_area(
@@ -2386,6 +2879,15 @@ if current_step == "context":
                 help="オンライン・オフラインの接点や販売フローを整理してください。",
                 height=170,
             )
+            guide = BMC_FIELD_GUIDES["bmc_channels"]
+            _render_field_guide_popover(
+                key="bmc_channels_popover",
+                title=guide["title"],
+                example=guide["example"],
+                best_practices=guide["best_practices"],
+                glossary_anchor=guide["glossary_anchor"],
+                diagram_html=guide.get("diagram_html"),
+            )
 
         context_state["qualitative_memo"] = st.text_area(
             "事業計画メモ",
@@ -2393,6 +2895,13 @@ if current_step == "context":
             placeholder=BUSINESS_CONTEXT_PLACEHOLDER["qualitative_memo"],
             help="KGI/KPIの設定根拠、注意点、投資判断に必要な情報などを自由に記入できます。",
             height=150,
+        )
+        _render_field_guide_popover(
+            key="qualitative_memo_popover",
+            title=QUALITATIVE_MEMO_GUIDE["title"],
+            example=QUALITATIVE_MEMO_GUIDE["example"],
+            best_practices=QUALITATIVE_MEMO_GUIDE["best_practices"],
+            glossary_anchor=QUALITATIVE_MEMO_GUIDE["glossary_anchor"],
         )
         st.caption("※ 記入した内容はウィザード内で保持され、事業計画書作成時の定性情報として活用できます。")
 
@@ -2587,26 +3096,32 @@ if current_step == "context":
                 label = FOUR_P_LABELS[key]
                 st.markdown(f"**{label}の強化策**")
                 lines = four_p_suggestions.get(key, [])
+                entry = four_p_state.get(key, {}) if isinstance(four_p_state.get(key), Mapping) else {}
                 if lines:
                     st.markdown("\n".join(f"- {line}" for line in lines))
                 else:
-                    st.markdown("- 入力が不足しているため、提案を生成できません。")
+                    st.markdown(_four_p_missing_message(key, entry))
         with recommendation_cols[1]:
             for key in FOUR_P_KEYS[2:]:
                 label = FOUR_P_LABELS[key]
                 st.markdown(f"**{label}の強化策**")
                 lines = four_p_suggestions.get(key, [])
+                entry = four_p_state.get(key, {}) if isinstance(four_p_state.get(key), Mapping) else {}
                 if lines:
                     st.markdown("\n".join(f"- {line}" for line in lines))
                 else:
-                    st.markdown("- 入力が不足しているため、提案を生成できません。")
+                    st.markdown(_four_p_missing_message(key, entry))
 
         st.markdown("**競合比較ハイライト**")
         competitor_highlights = recommendations.get("competitor_highlights", [])
         if competitor_highlights:
             st.markdown("\n".join(f"- {item}" for item in competitor_highlights))
         else:
-            st.markdown("- 競合データが未入力のため、差分分析が表示できません。")
+            st.markdown(
+                "- 競合データが未入力のため、差分分析が表示できません。\n"
+                "  - 競合社名・平均価格・サービススコアを入力すると優位性を自動算出します。\n"
+                f"  - [ヘルプセンター用語集]({GLOSSARY_URL})で指標の定義を確認"
+            )
 
         st.markdown("**顧客価値提案 (UVP)**")
         st.write(recommendations.get("uvp", ""))
@@ -2619,6 +3134,11 @@ if current_step == "context":
                     f"- ポジショニング: {recommendations.get('positioning', '')}",
                 ]
             )
+        )
+        st.caption(
+            "※ STP提案はセグメンテーション・ターゲティング・ポジショニングの各評価軸をスコアリングし、"
+            "競合比較と自社リソースの整合性から推奨シナリオを構築しています。"
+            f" 詳細は[ヘルプセンター用語集]({GLOSSARY_URL})をご参照ください。"
         )
         positioning_points = recommendations.get("positioning_points", [])
         if positioning_points:
@@ -3391,6 +3911,36 @@ elif current_step == "costs":
         st.info("コスト項目が0のため、粗利率チャートを描画できるデータがありません。")
 
     cost_range_state: Dict[str, Dict[str, float]] = st.session_state.get(COST_RANGE_STATE_KEY, {})
+
+    tax_snapshot = _build_tax_payload_snapshot(tax_defaults)
+    capex_df_current = pd.DataFrame(st.session_state.get("capex_editor_df", capex_defaults_df))
+    loan_df_current = pd.DataFrame(st.session_state.get("loan_editor_df", loan_defaults_df))
+    costs_bundle_payload = _build_bundle_payload_from_inputs(
+        sales_df,
+        variable_inputs,
+        fixed_inputs,
+        noi_inputs,
+        noe_inputs,
+        unit_factor=unit_factor,
+        cost_range_state=cost_range_state,
+        capex_df=capex_df_current,
+        loan_df=loan_df_current,
+        tax_payload=tax_snapshot,
+    )
+    _, costs_preview_issues, costs_preview_amounts, costs_preview_cf = _compute_plan_preview(
+        costs_bundle_payload,
+        settings_state,
+        unit,
+    )
+    if costs_preview_amounts:
+        _render_financial_dashboard(
+            costs_preview_amounts,
+            costs_preview_cf,
+            unit=unit,
+            unit_factor=unit_factor,
+        )
+    elif costs_preview_issues:
+        st.info("入力内容にエラーがあるため、リアルタイムの損益・CFプレビューは表示されません。")
     with st.expander("調 レンジ入力 (原価・費用の幅)", expanded=False):
         st.caption("最小・中央値・最大の3点を入力すると、分析ページで感度レンジを参照できます。")
 
@@ -3635,6 +4185,7 @@ elif current_step == "invest":
 
     preview_cf_data: Dict[str, object] | None = None
     preview_issues: List[ValidationIssue] = []
+    preview_amounts: Dict[str, Decimal] = {}
     if capex_preview and loan_preview:
         preview_raw = dict(finance_raw)
         preview_raw["capex"] = capex_payload
@@ -3658,6 +4209,14 @@ elif current_step == "invest":
                 preview_bundle.loans,
                 preview_bundle.tax,
             )
+
+    if preview_amounts:
+        _render_financial_dashboard(
+            preview_amounts,
+            preview_cf_data,
+            unit=unit,
+            unit_factor=unit_factor,
+        )
 
     if preview_cf_data and isinstance(preview_cf_data, dict):
         metrics_preview = preview_cf_data.get("investment_metrics", {})
@@ -3879,27 +4438,18 @@ elif current_step == "tax":
         loan_df=loan_df_current,
         tax_payload=tax_payload,
     )
-    preview_bundle, preview_issues = validate_bundle(bundle_payload)
+    preview_bundle, preview_issues, preview_amounts, preview_cf_data = _compute_plan_preview(
+        bundle_payload,
+        settings_state,
+        unit,
+    )
 
-    preview_amounts: Dict[str, Decimal] = {}
-    preview_cf_data: Dict[str, object] | None = None
-    if preview_bundle:
-        fte_value = Decimal(str(settings_state.get("fte", 20)))
-        plan_preview = plan_from_models(
-            preview_bundle.sales,
-            preview_bundle.costs,
-            preview_bundle.capex,
-            preview_bundle.loans,
-            preview_bundle.tax,
-            fte=fte_value,
-            unit=unit,
-        )
-        preview_amounts = compute(plan_preview)
-        preview_cf_data = generate_cash_flow(
+    if preview_amounts:
+        _render_financial_dashboard(
             preview_amounts,
-            preview_bundle.capex,
-            preview_bundle.loans,
-            preview_bundle.tax,
+            preview_cf_data,
+            unit=unit,
+            unit_factor=unit_factor,
         )
 
     if preview_bundle and preview_amounts:
