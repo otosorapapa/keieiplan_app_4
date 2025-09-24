@@ -13,7 +13,7 @@ from ui.streamlit_compat import use_container_width_kwargs
 USAGE_GUIDE_TEXT = (
     "1. **入力を整える**: コントロールハブで売上・コストのレバーと会計年度、FTEを設定します。\n"
     "2. **検証と分析**: シナリオ/感応度タブで前提を比較し、AIインサイトでチェックポイントを確認します。\n"
-    "3. **可視化と出力**: グラフや表で可視化し、エクスポートタブからExcelをダウンロードして共有します。"
+    "3. **可視化と出力**: グラフや表で可視化し、PDF / PowerPoint / Excel / Wordをエクスポートして共有します。"
 )
 
 
@@ -31,8 +31,8 @@ def render_app_header(
     title: str,
     subtitle: str,
     help_key: str = "show_usage_guide",
-    help_button_label: str = "使い方ガイド",
-    reset_label: str = "Reset all",
+    help_button_label: str = "操作ガイド",
+    reset_label: str = "全データをリセット",
     show_reset: bool = True,
     on_reset: Callable[[], None] | None = None,
 ) -> HeaderActions:
@@ -59,8 +59,8 @@ def render_app_header(
         accessibility_col = columns[2]
         with accessibility_col:
             with st.popover(
-                "Aa アクセシビリティ",
-                help="フォントサイズやコントラストを調整します。",
+                "Aa 表示カスタマイズ",
+                help="フォントサイズや配色を調整して読みやすさを最適化します。",
             ):
                 st.write("読みやすさを調整")
                 st.slider(
@@ -70,7 +70,7 @@ def render_app_header(
                     step=0.05,
                     value=float(st.session_state.get("ui_font_scale", 1.0)),
                     key="ui_font_scale",
-                    help="文字サイズを大きくするとモバイルでも閲覧しやすくなります。",
+                    help="画面全体の文字サイズを変更してデバイスに合わせた表示にします。",
                 )
                 st.toggle(
                     "高コントラストモード",
@@ -84,25 +84,25 @@ def render_app_header(
                     index=0 if st.session_state.get("ui_color_scheme", "light") == "light" else 1,
                     format_func=lambda value: "ライト" if value == "light" else "ダーク",
                     key="ui_color_scheme",
-                    help="状況に合わせてライト/ダークテーマを切り替えます。",
+                    help="閲覧環境に合わせてライト/ダークテーマを切り替えます。",
                 )
                 st.toggle(
                     "色覚サポート",
                     value=bool(st.session_state.get("ui_color_blind", False)),
                     key="ui_color_blind",
-                    help="色覚特性に配慮したカラーパレットに変更します。",
+                    help="色覚特性に配慮したパレットへ変更します。",
                 )
                 st.toggle(
                     "サイドバーをコンパクト表示",
                     value=bool(st.session_state.get("ui_sidebar_compact", False)),
                     key="ui_sidebar_compact",
-                    help="左メニューをアイコン中心にして画面を広く使います。",
+                    help="左メニューをアイコン中心にして作業領域を広げます。",
                 )
                 st.toggle(
                     "チュートリアルモード",
                     value=bool(st.session_state.get("tutorial_mode", True)),
                     key="tutorial_mode",
-                    help="有効にすると各ステップでガイドがポップアップ表示されます。",
+                    help="有効にすると各ステップで操作ガイドがポップアップ表示されます。",
                 )
                 st.caption("設定は全ページで共有されます。")
         account_col = columns[3]
@@ -111,7 +111,7 @@ def render_app_header(
             account_label = (
                 f"▣ {current_user.display_name}" if current_user else "⎔ ログイン"
             )
-            with st.popover(account_label, help="保存やバージョン管理を行うにはログインしてください。"):
+            with st.popover(account_label, help="暗号化されたクラウド保存とバージョン管理を利用するにはログインしてください。"):
                 if current_user:
                     st.markdown(
                         f"**{current_user.display_name}**\n\n{current_user.email}",
@@ -203,7 +203,7 @@ def render_usage_guide_panel(help_key: str = "show_usage_guide") -> None:
 
 
 def render_app_footer(
-    caption: str = "© 経営計画策定WEBアプリ（Streamlit版） | 表示単位と計算単位を分離し、丸めの影響を最小化しています。",
+    caption: str = "© 経営計画スタジオ | 情報設計の最適化と精緻な財務モデリングを提供します。",
 ) -> None:
     """Render the global footer."""
 
@@ -218,6 +218,17 @@ def render_app_footer(
                     <span class="app-footer__brand-name">経営計画スタジオ</span>
                     <span class="app-footer__tagline">Powered by AI & Consulting</span>
                 </div>
+            </div>
+            <div class="app-footer__trust">
+                <div class="app-footer__security">
+                    <span class="security-badge" aria-label="ISO/IEC 27001認証">🔐 ISO/IEC 27001</span>
+                    <span class="security-badge" aria-label="SSL/TLS暗号化">🔒 SSL/TLS</span>
+                </div>
+                <p class="app-footer__security-text">データは暗号化され、ISO/IEC 27001に準拠したストレージに保管されています。</p>
+            </div>
+            <div class="app-footer__expertise" role="list" aria-label="専門家監修に関するバッジ">
+                <span class="expert-badge" role="listitem">中小企業診断士が監修</span>
+                <span class="expert-badge" role="listitem">最新の経営フレームワークに準拠</span>
             </div>
             <div class="app-footer__links">
                 <a href="mailto:support@keieiplan.jp">サポートに連絡</a>

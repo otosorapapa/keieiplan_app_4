@@ -347,6 +347,37 @@ button:focus-visible {{
     opacity: 0.92;
 }}
 
+.trust-badges {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin: -0.4rem 0 1.6rem 0;
+}}
+
+.trust-badge {{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.55rem 0.9rem;
+    border-radius: 999px;
+    background: rgba(28, 106, 216, 0.12);
+    border: 1px solid rgba(15, 44, 79, 0.12);
+    color: var(--accent);
+    font-size: calc(0.9rem * var(--base-font-scale));
+    font-weight: 500;
+    box-shadow: 0 10px 24px rgba(6, 19, 37, 0.12);
+}}
+
+.trust-badge__icon {{
+    font-size: 1.1rem;
+}}
+
+.trust-badge__text {{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}}
+
 .section-heading {{
     display: flex;
     align-items: center;
@@ -803,11 +834,91 @@ button:focus-visible {{
     text-decoration: underline;
 }}
 
+.security-panel {{
+    margin-top: 1.2rem;
+    padding: 1.25rem 1.4rem;
+    border-radius: 18px;
+    background: rgba(28, 106, 216, 0.08);
+    border: 1px solid rgba(15, 44, 79, 0.14);
+    box-shadow: 0 18px 36px rgba(6, 19, 37, 0.08);
+}}
+
+.security-panel__lead {{
+    margin: 0 0 0.6rem 0;
+    font-weight: 600;
+    color: var(--accent);
+}}
+
+.security-panel__badges {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.6rem;
+}}
+
+.security-panel__list {{
+    margin: 0;
+    padding-left: 1.2rem;
+    color: var(--text-subtle);
+    font-size: calc(0.88rem * var(--base-font-scale));
+    display: grid;
+    gap: 0.35rem;
+}}
+
 .app-footer {{
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
     padding: 0.6rem 0 1.2rem 0;
+}}
+
+.app-footer__trust {{
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}}
+
+.app-footer__security {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}}
+
+.security-badge {{
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    background: rgba(28, 106, 216, 0.14);
+    color: var(--accent);
+    font-size: calc(0.82rem * var(--base-font-scale));
+    font-weight: 600;
+    border: 1px solid rgba(15, 44, 79, 0.14);
+}}
+
+.app-footer__security-text {{
+    margin: 0;
+    font-size: calc(0.82rem * var(--base-font-scale));
+    color: var(--text-subtle);
+}}
+
+.app-footer__expertise {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}}
+
+.expert-badge {{
+    display: inline-flex;
+    align-items: center;
+    padding: 0.3rem 0.65rem;
+    border-radius: 8px;
+    background: rgba(15, 44, 79, 0.1);
+    color: var(--accent);
+    font-size: calc(0.8rem * var(--base-font-scale));
+    font-weight: 600;
+    letter-spacing: 0.02em;
 }}
 
 .app-footer__brand {{
