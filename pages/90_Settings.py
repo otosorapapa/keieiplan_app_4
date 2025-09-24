@@ -19,7 +19,7 @@ from services import auth
 from ui.streamlit_compat import use_container_width_kwargs
 
 st.set_page_config(
-    page_title="経営計画スタジオ｜Settings",
+    page_title="経営計画スタジオ｜設定",
     page_icon="⚙",
     layout="wide",
 )
@@ -101,5 +101,5 @@ with backup_tab:
         st.markdown(
             "- 通信は自動的にHTTPSへリダイレクトされます。\n"
             "- パスワードはbcryptでハッシュ化され、平文では保存されません。\n"
-            "- 不要になったデータは [Inputs] ページでバージョン削除予定です。"
+            "- 不要になったデータは [入力] ページでバージョン削除予定です。"
         )

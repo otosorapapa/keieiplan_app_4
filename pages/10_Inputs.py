@@ -50,7 +50,7 @@ from ui.streamlit_compat import use_container_width_kwargs
 from ui.fermi import FERMI_SEASONAL_PATTERNS, compute_fermi_estimate
 
 st.set_page_config(
-    page_title="経営計画スタジオ｜Inputs",
+    page_title="経営計画スタジオ｜入力",
     page_icon="✎",
     layout="wide",
 )
@@ -511,7 +511,7 @@ def _render_financial_dashboard(
         )
         st.altair_chart(net_chart, use_container_width=True)
         if len(cf_df) > horizon:
-            st.caption("※ 表示は直近24ヶ月まで。全期間はAnalysisタブで確認できます。")
+            st.caption("※ 表示は直近24ヶ月まで。全期間は「分析」タブで確認できます。")
 
 
 def _four_p_missing_message(key: str, entry: Mapping[str, object]) -> str:
@@ -4179,7 +4179,7 @@ elif current_step == "invest":
                 **use_container_width_kwargs(st.dataframe),
             )
             if len(amortization) > 36:
-                st.caption("※ 37ヶ月目以降はAnalysisタブの詳細スケジュールで確認できます。")
+                st.caption("※ 37ヶ月目以降は「分析」タブの詳細スケジュールで確認できます。")
         else:
             st.info("元本・金利・返済期間を入力すると返済スケジュールを自動計算します。")
 
@@ -4399,7 +4399,7 @@ elif current_step == "tax":
     )
     _persist_financial_timeseries(edited_financial_df, fiscal_year)
     st.caption(
-        "金額は円ベースで入力してください。EBITDA・FCF・ROAなどの自動計算結果はAnalysisページで確認できます。"
+        "金額は円ベースで入力してください。EBITDA・FCF・ROAなどの自動計算結果は「分析」ページで確認できます。"
     )
 
     if validation_errors:
@@ -4571,7 +4571,7 @@ elif current_step == "tax":
                     },
                 )
                 if len(display_df) > preview_horizon:
-                    st.caption("※ 25ヶ月目以降はAnalysisタブの詳細資金繰りで確認できます。")
+                    st.caption("※ 25ヶ月目以降は「分析」タブの詳細資金繰りで確認できます。")
 
                 cumulative_decimals = monthly_df["cumulative"].apply(_to_decimal_safe)
                 min_cumulative = cumulative_decimals.min()

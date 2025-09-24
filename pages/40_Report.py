@@ -34,7 +34,7 @@ from state import ensure_session_defaults, load_finance_bundle
 from theme import THEME_COLORS, inject_theme
 
 st.set_page_config(
-    page_title="経営計画スタジオ｜Report",
+    page_title="経営計画スタジオ｜レポート",
     page_icon="報",
     layout="wide",
 )
