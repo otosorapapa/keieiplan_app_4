@@ -19,7 +19,7 @@ from calc import compute, generate_cash_flow, plan_from_models, summarize_plan_m
 from formatting import UNIT_FACTORS, format_amount_with_unit, format_ratio
 from models.finance import SalesItem
 from state import ensure_session_defaults, load_finance_bundle, reset_app_state
-from theme import inject_theme
+from theme import THEME_COLORS, inject_theme
 from services import auth
 from ui.chrome import HeaderActions, render_app_footer, render_app_header, render_usage_guide_panel
 from ui.components import MetricCard, render_callout, render_metric_cards
@@ -631,13 +631,68 @@ def render_home_page() -> None:
         }
         if non_op_income > 0:
             cost_breakdown["営業外収益"] = _to_unit(non_op_income)
-        cost_df = pd.DataFrame({"項目": list(cost_breakdown.keys()), "金額": list(cost_breakdown.values())})
-        if cost_df["金額"].sum() <= 0:
+        total_cost = sum(cost_breakdown.values())
+        if total_cost <= 0:
             st.info("原価構成グラフを表示するには、費用データが必要です。")
         else:
-            cost_fig = px.pie(cost_df, names="項目", values="金額", hole=0.35)
-            cost_fig.update_layout(title="原価・費用構成", margin=dict(t=40, r=16, l=16, b=16))
+            category_label = "費用構成"
+            axis_position = 0.0
+            cost_records = [
+                {"表示": "内訳", "軸": axis_position, "項目": name, "金額": value}
+                for name, value in cost_breakdown.items()
+            ]
+            cost_records.append(
+                {"表示": "合計", "軸": axis_position, "項目": "合計固定費", "金額": total_cost}
+            )
+            cost_df = pd.DataFrame(cost_records)
+            segment_df = cost_df[cost_df["表示"] == "内訳"].copy()
+
+            color_keys = ["primary", "accent", "positive", "warning", "chart_purple", "chart_green"]
+            color_sequence = [THEME_COLORS.get(key, THEME_COLORS["accent"]) for key in color_keys]
+
+            cost_fig = px.bar(
+                segment_df,
+                x="金額",
+                y="軸",
+                color="項目",
+                orientation="h",
+                barmode="stack",
+                color_discrete_sequence=color_sequence,
+                custom_data=["項目"],
+            )
+            cost_fig.update_traces(
+                hovertemplate="%{customdata[0]}: %{x:,.1f} " + unit + "<extra></extra>"
+            )
+            cost_fig.update_yaxes(
+                tickmode="array",
+                tickvals=[axis_position],
+                ticktext=[category_label],
+                title="",
+                showgrid=False,
+                zeroline=False,
+                range=[axis_position - 0.6, axis_position + 0.6],
+            )
+            cost_fig.update_xaxes(title=f"金額 ({unit})")
+            cost_fig.update_layout(
+                title="原価・費用構成",
+                margin=dict(t=40, r=16, l=16, b=16),
+                legend_title="項目",
+            )
+
+            cost_fig.add_trace(
+                go.Scatter(
+                    x=[total_cost, total_cost],
+                    y=[axis_position - 0.45, axis_position + 0.45],
+                    mode="lines",
+                    name="合計固定費",
+                    line=dict(color=THEME_COLORS["primary_light"], width=2, dash="dash"),
+                    hovertemplate="合計固定費: %{x:,.1f} " + unit + "<extra></extra>",
+                    showlegend=True,
+                )
+            )
+
             st.plotly_chart(cost_fig, use_container_width=True)
+            st.caption("積み上げ棒グラフは費用の内訳を示し、破線が合計固定費の計画値を表します。")
 
         gross_ratio_total = gross_total / filtered_annual_sales if filtered_annual_sales > 0 else Decimal("0")
         month_total_sales = sum(
