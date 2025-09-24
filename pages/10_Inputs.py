@@ -254,6 +254,15 @@ def _decimal_from(value: object) -> Decimal:
         return Decimal("0")
 
 
+def _encode_invisible_key(value: str) -> str:
+    """Encode a string into zero-width characters for invisible uniqueness."""
+
+    value_bytes = str(value).encode("utf-8")
+    binary = "".join(f"{byte:08b}" for byte in value_bytes)
+    zero_width = {"0": "\u200b", "1": "\u200c"}
+    return "".join(zero_width[bit] for bit in binary)
+
+
 def _render_field_guide_popover(
     *,
     key: str,
@@ -266,8 +275,12 @@ def _render_field_guide_popover(
     """Render a popover button that exposes examples and best practices."""
 
     glossary_url = f"{GLOSSARY_URL}#{glossary_anchor}" if glossary_anchor else GLOSSARY_URL
+    base_label = f"📘 {title}"
+    # ``st.popover`` does not support the ``key`` argument, so encode it invisibly to
+    # keep widget identifiers unique without altering the visible label.
+    popover_label = f"{base_label}{_encode_invisible_key(key)}" if key else base_label
     popover_kwargs = use_container_width_kwargs(st.popover)
-    with st.popover(f"📘 {title}", key=key, **popover_kwargs):
+    with st.popover(popover_label, **popover_kwargs):
         if example:
             st.markdown("**記入例**")
             st.markdown(example)
