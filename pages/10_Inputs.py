@@ -2091,18 +2091,41 @@ def _percent_number_input(
     key: str | None = None,
     help: str | None = None,
 ) -> float:
-    display_value = float(value) * 100.0
-    display_min = float(min_value) * 100.0
+    ratio_value = float(value)
+    ratio_min = float(min_value)
+    ratio_max = float(max_value) if max_value is not None else None
+
+    if ratio_value > 1.0 and (ratio_max is None or ratio_max <= 1.0):
+        ratio_value /= 100.0
+
+    if ratio_max is not None:
+        ratio_value = min(ratio_value, ratio_max)
+    ratio_value = max(ratio_value, ratio_min)
+
+    display_value = ratio_value * 100.0
+    display_min = ratio_min * 100.0
+    display_max = ratio_max * 100.0 if ratio_max is not None else None
     display_step = float(step) * 100.0 if step else 1.0
+
     kwargs = {
         "min_value": display_min,
         "step": display_step,
         "value": display_value,
         "format": "%.2f",
     }
-    if max_value is not None:
-        kwargs["max_value"] = float(max_value) * 100.0
+    if display_max is not None:
+        kwargs["max_value"] = display_max
     if key is not None:
+        if key in st.session_state:
+            try:
+                current_value = float(st.session_state[key])
+            except (TypeError, ValueError):
+                st.session_state[key] = display_value
+            else:
+                if display_max is not None and current_value > display_max:
+                    st.session_state[key] = display_max
+                elif current_value < display_min:
+                    st.session_state[key] = display_min
         kwargs["key"] = key
     if help is not None:
         kwargs["help"] = help
