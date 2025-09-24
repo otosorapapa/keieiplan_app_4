@@ -266,7 +266,8 @@ def _render_field_guide_popover(
     """Render a popover button that exposes examples and best practices."""
 
     glossary_url = f"{GLOSSARY_URL}#{glossary_anchor}" if glossary_anchor else GLOSSARY_URL
-    with st.popover(f"📘 {title}", key=key, use_container_width=True):
+    popover_kwargs = use_container_width_kwargs(st.popover)
+    with st.popover(f"📘 {title}", key=key, **popover_kwargs):
         if example:
             st.markdown("**記入例**")
             st.markdown(example)
