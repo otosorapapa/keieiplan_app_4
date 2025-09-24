@@ -8,83 +8,89 @@ import streamlit as st
 from services.security import enforce_https
 
 THEME_COLORS: Dict[str, str] = {
-    "background": "#F4F6FB",
+    "background": "#F7F8FA",
     "surface": "#FFFFFF",
-    "surface_alt": "#E7ECF7",
-    "primary": "#1C6AD8",
-    "primary_light": "#5A8FE4",
-    "accent": "#0F2C4F",
-    "positive": "#1F6B54",
-    "positive_strong": "#0E3F2D",
-    "negative": "#8A3542",
-    "neutral": "#CBD4E4",
-    "text": "#0B1D33",
-    "text_subtle": "#4B5D75",
-    "chart_blue": "#1C6AD8",
-    "chart_orange": "#2E7ABF",
-    "chart_green": "#4F8ED8",
-    "chart_purple": "#7FA6E0",
+    "surface_alt": "#EEF1F6",
+    "primary": "#0B1F3B",
+    "primary_light": "#1E3553",
+    "accent": "#1E88E5",
+    "positive": "#3C7A5E",
+    "positive_strong": "#2F5F4A",
+    "negative": "#B5504A",
+    "neutral": "#D3DAE3",
+    "text": "#1A1A1A",
+    "text_subtle": "#5A6B7A",
+    "chart_blue": "#1E88E5",
+    "chart_orange": "#5E9ED6",
+    "chart_green": "#3C7A5E",
+    "chart_purple": "#6F7FA3",
+    "warning": "#B27B16",
 }
 
 DARK_THEME_COLORS: Dict[str, str] = {
-    "background": "#061325",
-    "surface": "#0F1F35",
-    "surface_alt": "#172C4A",
-    "primary": "#4A8DE8",
-    "primary_light": "#74A5F1",
-    "accent": "#0A1E3A",
-    "positive": "#36B295",
-    "positive_strong": "#1C7A60",
-    "negative": "#D97582",
-    "neutral": "#42577A",
-    "text": "#E8EEF7",
-    "text_subtle": "#B8C4D9",
-    "chart_blue": "#4A8DE8",
-    "chart_orange": "#6FA4E8",
-    "chart_green": "#91B8F0",
-    "chart_purple": "#BACFF7",
+    "background": "#071223",
+    "surface": "#0F1D33",
+    "surface_alt": "#16263D",
+    "primary": "#1E88E5",
+    "primary_light": "#4FA0E9",
+    "accent": "#6AB2F2",
+    "positive": "#5FAF93",
+    "positive_strong": "#3E7F68",
+    "negative": "#D06A6A",
+    "neutral": "#3E4C63",
+    "text": "#F1F4F9",
+    "text_subtle": "#C6CFDB",
+    "chart_blue": "#6AB2F2",
+    "chart_orange": "#84C1F2",
+    "chart_green": "#5FAF93",
+    "chart_purple": "#A0BFE9",
+    "warning": "#E0B565",
 }
 
 COLOR_BLIND_COLORS: Dict[str, str] = {
-    "background": "#F4F7FB",
+    "background": "#F7F8FA",
     "surface": "#FFFFFF",
-    "surface_alt": "#E4EAF5",
-    "primary": "#1E63B6",
-    "primary_light": "#4D84CE",
-    "accent": "#0E2950",
-    "positive": "#226B93",
-    "positive_strong": "#134361",
-    "negative": "#8B4952",
-    "neutral": "#C7D2E3",
-    "text": "#0E223A",
-    "text_subtle": "#45546B",
-    "chart_blue": "#1E63B6",
-    "chart_orange": "#3F7FB6",
-    "chart_green": "#5F92C7",
-    "chart_purple": "#7FA6D8",
+    "surface_alt": "#EEF1F6",
+    "primary": "#0B1F3B",
+    "primary_light": "#1E395A",
+    "accent": "#1170AA",
+    "positive": "#4C7C6A",
+    "positive_strong": "#366054",
+    "negative": "#B45A4C",
+    "neutral": "#D0D6E0",
+    "text": "#1A1A1A",
+    "text_subtle": "#566472",
+    "chart_blue": "#1170AA",
+    "chart_orange": "#5B8E95",
+    "chart_green": "#6A7BA3",
+    "chart_purple": "#8A89A8",
+    "warning": "#AF7F2E",
 }
 
 HIGH_CONTRAST_COLORS: Dict[str, str] = {
-    "background": "#040A16",
-    "surface": "#0B1526",
-    "surface_alt": "#122036",
-    "primary": "#2F8BF5",
-    "primary_light": "#63A5FF",
-    "accent": "#FFFFFF",
-    "positive": "#3CD3A7",
-    "positive_strong": "#1E8A67",
-    "negative": "#FF848E",
-    "neutral": "#5F6E88",
-    "text": "#FFFFFF",
-    "text_subtle": "#D7E0F0",
-    "chart_blue": "#63A5FF",
-    "chart_orange": "#9FBFFB",
-    "chart_green": "#C4DBFF",
-    "chart_purple": "#E0EDFF",
+    "background": "#FFFFFF",
+    "surface": "#EFF3F9",
+    "surface_alt": "#E0E7F1",
+    "primary": "#0B1F3B",
+    "primary_light": "#1E88E5",
+    "accent": "#000000",
+    "positive": "#005C3C",
+    "positive_strong": "#003F29",
+    "negative": "#7A1F27",
+    "neutral": "#4A5C73",
+    "text": "#000000",
+    "text_subtle": "#1A1A1A",
+    "chart_blue": "#0B1F3B",
+    "chart_orange": "#1E88E5",
+    "chart_green": "#005C3C",
+    "chart_purple": "#2F3E72",
+    "warning": "#8C4A00",
 }
 
 CUSTOM_STYLE_TEMPLATE = """
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600;700&display=swap');
+
 :root {{
     --base-font-scale: {font_scale};
     --base-bg: {background};
@@ -103,16 +109,26 @@ CUSTOM_STYLE_TEMPLATE = """
     --chart-orange: {chart_orange};
     --chart-green: {chart_green};
     --chart-purple: {chart_purple};
+    --warning: {warning};
+    --border-color: rgba(11, 31, 59, 0.12);
+    --border-strong: rgba(11, 31, 59, 0.2);
+    --shadow-soft: 0 16px 32px rgba(11, 31, 59, 0.08);
+    --shadow-subtle: 0 8px 20px rgba(11, 31, 59, 0.06);
+    --radius-lg: 16px;
+    --radius-md: 12px;
+    --radius-sm: 8px;
     --sidebar-compact: {sidebar_compact};
 }}
 
 html, body, [data-testid="stAppViewContainer"] {{
     background-color: var(--base-bg);
     color: var(--text-color);
-    font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
+    font-family: "Inter", "Source Sans 3", "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
     font-size: calc(16px * var(--base-font-scale));
-    line-height: 1.62;
+    line-height: 1.5;
     letter-spacing: 0.01em;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "liga" 1;
 }}
 
 h1, h2, h3, h4, h5, h6,
@@ -122,73 +138,81 @@ h1, h2, h3, h4, h5, h6,
 .stMarkdown h4,
 .stMarkdown h5,
 .stMarkdown h6 {{
-    font-family: "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    color: var(--text-color);
+    font-family: "Inter", "Source Sans 3", "Noto Sans JP", "Hiragino Sans", sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: var(--primary);
 }}
 
+h1, .stMarkdown h1 {{ font-size: calc(1.75rem * var(--base-font-scale)); }}
+h2, .stMarkdown h2 {{ font-size: calc(1.5rem * var(--base-font-scale)); }}
+h3, .stMarkdown h3 {{ font-size: calc(1.25rem * var(--base-font-scale)); }}
+h4, .stMarkdown h4 {{ font-size: calc(1.1rem * var(--base-font-scale)); }}
+h5, .stMarkdown h5 {{ font-size: calc(1rem * var(--base-font-scale)); }}
+h6, .stMarkdown h6 {{ font-size: calc(0.9rem * var(--base-font-scale)); }}
+
 [data-testid="stSidebar"] {{
-    background: linear-gradient(180deg, rgba(15, 44, 79, 0.92) 0%, rgba(28, 106, 216, 0.88) 100%);
-    color: #F7FAFC;
+    background: linear-gradient(180deg, rgba(11, 31, 59, 0.96) 0%, rgba(11, 31, 59, 0.92) 55%, rgba(30, 136, 229, 0.88) 100%);
+    color: #F5F7FA;
     width: calc(18rem - 9rem * var(--sidebar-compact));
     min-width: calc(16rem - 8rem * var(--sidebar-compact));
     transition: width 0.35s ease;
-    box-shadow: 12px 0 28px rgba(6, 19, 37, 0.2);
+    box-shadow: 16px 0 32px rgba(11, 31, 59, 0.2);
 }}
 
 [data-testid="stSidebar"] * {{
-    color: #F7FAFC !important;
+    color: #F5F7FA !important;
 }}
 
 [data-testid="stSidebar"] [data-testid="stSidebarNav"] ul {{
-    padding: 0.75rem 0.4rem 1.4rem 0.4rem;
+    padding: 16px 8px 24px 8px;
     display: grid;
-    gap: 0.35rem;
+    gap: 8px;
 }}
 
 [data-testid="stSidebar"] [data-testid="stSidebarNav"] a {{
     display: flex;
     align-items: center;
-    gap: calc(0.8rem * (1 - var(--sidebar-compact)) + 0.4rem);
-    padding: 0.6rem 1rem;
-    border-radius: 14px;
+    gap: calc(0.6rem * (1 - var(--sidebar-compact)) + 0.4rem);
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
     transition: background-color 0.25s ease, gap 0.2s ease, transform 0.25s ease;
     font-weight: 600;
     position: relative;
-    backdrop-filter: blur(2px);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }}
 
 [data-testid="stSidebar"] [data-testid="stSidebarNav"] a:hover {{
-    background-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.12);
     transform: translateX(2px);
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-current="page"] {{
+    background: rgba(255, 255, 255, 0.18);
+    border-color: rgba(255, 255, 255, 0.3);
 }}
 
 [data-testid="stSidebar"] [data-testid="stSidebarNav"] a::before {{
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: calc(2.2rem - 0.8rem * var(--sidebar-compact));
-    height: calc(2.2rem - 0.8rem * var(--sidebar-compact));
-    border-radius: 16px;
+    width: calc(2rem - 0.7rem * var(--sidebar-compact));
+    height: calc(2rem - 0.7rem * var(--sidebar-compact));
+    border-radius: 12px;
     background: rgba(255, 255, 255, 0.14);
-    border: 1px solid rgba(247, 250, 252, 0.25);
-    margin-right: calc(0.45rem * (1 - var(--sidebar-compact)));
+    margin-right: calc(0.35rem * (1 - var(--sidebar-compact)));
     font-size: 1.05rem;
-    font-family: "Noto Sans JP", "Noto Sans Symbols", "Hiragino Sans", sans-serif;
     font-weight: 600;
-    color: #F7FAFC;
-    transition: background-color 0.25s ease, transform 0.25s ease;
     content: "";
 }}
 
 [data-testid="stSidebar"] [data-testid="stSidebarNav"] a:hover::before {{
     background: rgba(255, 255, 255, 0.22);
-    transform: translateY(-1px);
 }}
 
 [data-testid="stSidebar"] [data-testid="stSidebarNav"] span {{
-    opacity: calc(1 - 0.92 * var(--sidebar-compact));
+    opacity: calc(1 - 0.9 * var(--sidebar-compact));
     transition: opacity 0.25s ease;
     white-space: nowrap;
     pointer-events: none;
@@ -234,7 +258,7 @@ h1, h2, h3, h4, h5, h6,
 
 [data-testid="stSidebar"] [data-testid="stSidebarNav"] a span::after {{
     font-size: calc(1rem - 0.2rem * var(--sidebar-compact));
-    color: #F7FAFC;
+    color: #F5F7FA;
     letter-spacing: 0.02em;
 }}
 
@@ -280,7 +304,7 @@ button:focus-visible {{
 
 .stTabs [role="tablist"] {{
     gap: 0.4rem;
-    border-bottom: 1px solid rgba(15, 44, 79, 0.12);
+    border-bottom: 1px solid rgba(11, 31, 59, 0.12);
     flex-wrap: wrap;
 }}
 
@@ -295,21 +319,21 @@ button:focus-visible {{
 
 .stTabs [role="tab"][aria-selected="true"] {{
     background-color: var(--surface);
-    color: var(--accent);
-    box-shadow: 0 -2px 24px rgba(15, 44, 79, 0.12);
-    border-color: rgba(15, 44, 79, 0.18);
-    border-bottom: 3px solid var(--primary);
+    color: var(--primary);
+    box-shadow: 0 -2px 20px rgba(11, 31, 59, 0.08);
+    border-color: var(--border-color);
+    border-bottom: 3px solid var(--accent);
 }}
 
 .hero-card {{
     position: relative;
     overflow: hidden;
-    background: linear-gradient(135deg, rgba(10, 34, 68, 0.96) 0%, rgba(28, 106, 216, 0.92) 100%);
+    background: linear-gradient(135deg, rgba(11, 31, 59, 0.95) 0%, rgba(30, 136, 229, 0.9) 100%);
     color: #ffffff;
-    padding: 2.4rem 3rem;
-    border-radius: 28px;
-    box-shadow: 0 28px 54px rgba(6, 19, 37, 0.32);
-    margin-bottom: 1.75rem;
+    padding: 32px;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+    margin-bottom: 24px;
 }}
 
 .hero-card::before {{
@@ -336,8 +360,8 @@ button:focus-visible {{
 }}
 
 .hero-card h1 {{
-    margin: 0 0 0.6rem 0;
-    font-size: calc(2.15rem * var(--base-font-scale));
+    margin: 0 0 12px 0;
+    font-size: calc(1.75rem * var(--base-font-scale));
     font-weight: 700;
 }}
 
@@ -360,12 +384,12 @@ button:focus-visible {{
     gap: 0.45rem;
     padding: 0.55rem 0.9rem;
     border-radius: 999px;
-    background: rgba(28, 106, 216, 0.12);
-    border: 1px solid rgba(15, 44, 79, 0.12);
+    background: rgba(30, 136, 229, 0.12);
+    border: 1px solid rgba(11, 31, 59, 0.12);
     color: var(--accent);
     font-size: calc(0.9rem * var(--base-font-scale));
     font-weight: 500;
-    box-shadow: 0 10px 24px rgba(6, 19, 37, 0.12);
+    box-shadow: 0 8px 20px rgba(11, 31, 59, 0.1);
 }}
 
 .trust-badge__icon {{
@@ -386,20 +410,20 @@ button:focus-visible {{
 }}
 
 .section-heading__icon {{
-    width: 3.1rem;
-    height: 3.1rem;
-    border-radius: 18px;
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-md);
     position: relative;
-    background: linear-gradient(135deg, rgba(28, 106, 216, 0.2) 0%, rgba(15, 44, 79, 0.16) 100%);
-    border: 1px solid rgba(15, 44, 79, 0.22);
-    box-shadow: 0 12px 24px rgba(6, 19, 37, 0.12);
+    background: linear-gradient(135deg, rgba(30, 136, 229, 0.18) 0%, rgba(11, 31, 59, 0.12) 100%);
+    border: 1px solid rgba(11, 31, 59, 0.2);
+    box-shadow: var(--shadow-subtle);
 }}
 
 .section-heading__icon::after {{
     content: "";
     position: absolute;
     inset: 0;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cg fill='none' stroke='%230F2C4F' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' stroke-opacity='0.7'%3E%3Cpath d='M10 30c4-6 10-6 14-12s6-14 14-14'/%3E%3Cpath d='M8 14c6 0 12 6 12 12s6 10 12 10'/%3E%3C/g%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cg fill='none' stroke='%230B1F3B' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' stroke-opacity='0.7'%3E%3Cpath d='M10 30c4-6 10-6 14-12s6-14 14-14'/%3E%3Cpath d='M8 14c6 0 12 6 12 12s6 10 12 10'/%3E%3C/g%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-size: 72%;
     background-position: center;
@@ -414,27 +438,26 @@ button:focus-visible {{
     margin: 0.2rem 0 0;
     font-size: calc(0.95rem * var(--base-font-scale));
     color: var(--text-subtle);
-    font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
 }}
 
 .responsive-card-grid {{
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(248px, 1fr));
+    gap: 16px;
     width: 100%;
 }}
 
 .metric-card {{
     position: relative;
     overflow: hidden;
-    background: linear-gradient(160deg, rgba(255, 255, 255, 0.94) 0%, rgba(231, 236, 247, 0.9) 100%);
-    border-radius: 22px;
-    padding: 1.3rem 1.55rem;
-    box-shadow: 0 18px 32px rgba(6, 19, 37, 0.1);
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    padding: 24px;
+    box-shadow: var(--shadow-subtle);
     display: flex;
     flex-direction: column;
-    gap: 0.55rem;
-    border: 1px solid rgba(15, 44, 79, 0.08);
+    gap: 12px;
+    border: 1px solid var(--border-color);
 }}
 
 .metric-card::before {{
@@ -444,7 +467,7 @@ button:focus-visible {{
     bottom: -70px;
     width: 180px;
     height: 180px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Cg fill='none' stroke='%230F2C4F' stroke-width='3' stroke-linecap='round' stroke-opacity='0.18'%3E%3Cpath d='M10 130c36-24 74-24 112-70'/%3E%3Cpath d='M22 158c44-26 98-66 148-122'/%3E%3C/g%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Cg fill='none' stroke='%230B1F3B' stroke-width='3' stroke-linecap='round' stroke-opacity='0.18'%3E%3Cpath d='M10 130c36-24 74-24 112-70'/%3E%3Cpath d='M22 158c44-26 98-66 148-122'/%3E%3C/g%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-size: cover;
 }}
@@ -456,23 +479,23 @@ button:focus-visible {{
     right: -40px;
     width: 150px;
     height: 150px;
-    background: radial-gradient(circle at center, rgba(28, 106, 216, 0.18), transparent 68%);
+    background: radial-gradient(circle at center, rgba(30, 136, 229, 0.18), transparent 68%);
     opacity: 0.9;
 }}
 
 .metric-card--positive {{
-    border-color: rgba(31, 107, 84, 0.45);
-    box-shadow: 0 18px 34px rgba(31, 107, 84, 0.16);
+    border-color: rgba(60, 122, 94, 0.45);
+    box-shadow: 0 16px 28px rgba(60, 122, 94, 0.16);
 }}
 
 .metric-card--caution {{
-    border-color: rgba(15, 44, 79, 0.35);
-    box-shadow: 0 18px 34px rgba(15, 44, 79, 0.12);
+    border-color: rgba(178, 123, 22, 0.4);
+    box-shadow: 0 16px 28px rgba(178, 123, 22, 0.14);
 }}
 
 .metric-card--negative {{
-    border-color: rgba(138, 53, 66, 0.35);
-    box-shadow: 0 18px 34px rgba(138, 53, 66, 0.12);
+    border-color: rgba(181, 80, 74, 0.4);
+    box-shadow: 0 16px 28px rgba(181, 80, 74, 0.14);
 }}
 
 .metric-card__header {{
@@ -484,15 +507,15 @@ button:focus-visible {{
 }}
 
 .metric-card__icon {{
-    width: 2.1rem;
-    height: 2.1rem;
-    border-radius: 14px;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: rgba(28, 106, 216, 0.12);
-    color: var(--accent);
-    font-size: 1.05rem;
+    background: rgba(30, 136, 229, 0.12);
+    color: var(--primary);
+    font-size: 1rem;
     font-weight: 600;
 }}
 
@@ -504,27 +527,28 @@ button:focus-visible {{
     margin-left: auto;
     font-size: calc(0.82rem * var(--base-font-scale));
     font-weight: 600;
+    color: var(--accent);
 }}
 
 .metric-card__tone-badge {{
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
-    margin-left: 0.5rem;
-    padding: 0.1rem 0.5rem;
+    gap: 4px;
+    margin-left: 8px;
+    padding: 2px 8px;
     border-radius: 999px;
-    background: rgba(15, 44, 79, 0.08);
+    background: rgba(30, 136, 229, 0.12);
     font-size: calc(0.75rem * var(--base-font-scale));
-    color: var(--accent);
+    color: var(--primary);
 }}
 .metric-card__tone-text {{
     font-weight: 600;
     letter-spacing: 0.02em;
 }}
 .metric-card__value {{
-    font-size: calc(1.5rem * var(--base-font-scale));
+    font-size: calc(1.45rem * var(--base-font-scale));
     font-weight: 700;
-    color: var(--primary);
+    color: var(--accent);
     margin: 0;
 }}
 
@@ -544,14 +568,14 @@ button:focus-visible {{
     position: relative;
     overflow: hidden;
     display: flex;
-    gap: 0.9rem;
-    padding: 1.15rem 1.3rem;
-    border-radius: 18px;
-    margin-bottom: 1.2rem;
-    background: linear-gradient(120deg, rgba(255, 255, 255, 0.96) 0%, rgba(231, 236, 247, 0.92) 100%);
-    border-left: 6px solid var(--primary);
-    box-shadow: 0 18px 32px rgba(6, 19, 37, 0.12);
-    border: 1px solid rgba(15, 44, 79, 0.08);
+    gap: 12px;
+    padding: 16px 20px;
+    border-radius: var(--radius-md);
+    margin-bottom: 16px;
+    background: var(--surface);
+    border-left: 6px solid var(--accent);
+    box-shadow: var(--shadow-subtle);
+    border: 1px solid var(--border-color);
 }}
 
 .callout::after {{
@@ -561,7 +585,7 @@ button:focus-visible {{
     top: -60px;
     width: 140px;
     height: 140px;
-    background: radial-gradient(circle at center, rgba(28, 106, 216, 0.16), transparent 70%);
+    background: radial-gradient(circle at center, rgba(30, 136, 229, 0.16), transparent 70%);
 }}
 
 .callout--positive {{
@@ -569,18 +593,18 @@ button:focus-visible {{
 }}
 
 .callout--caution {{
-    border-left-color: var(--accent);
+    border-left-color: var(--warning);
 }}
 
 .callout__icon {{
-    width: 2.2rem;
-    height: 2.2rem;
-    border-radius: 14px;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: rgba(28, 106, 216, 0.12);
-    color: var(--accent);
+    background: rgba(30, 136, 229, 0.12);
+    color: var(--primary);
     font-size: 1.1rem;
     font-weight: 600;
 }}
@@ -596,32 +620,32 @@ button:focus-visible {{
 }}
 
 .form-card {{
-    background: linear-gradient(140deg, rgba(255, 255, 255, 0.98) 0%, rgba(231, 236, 247, 0.9) 100%);
-    border-radius: 24px;
-    padding: 1.6rem 1.8rem;
-    margin: 1.2rem 0;
-    box-shadow: 0 20px 36px rgba(6, 19, 37, 0.08);
-    border: 1px solid rgba(15, 44, 79, 0.08);
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: 24px 28px;
+    margin: 24px 0;
+    box-shadow: var(--shadow-soft);
+    border: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
-    gap: 1.2rem;
+    gap: 20px;
 }}
 
 .form-card__header {{
     display: flex;
     align-items: center;
-    gap: 0.85rem;
+    gap: 12px;
 }}
 
 .form-card__icon {{
-    width: 2.2rem;
-    height: 2.2rem;
-    border-radius: 16px;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: rgba(28, 106, 216, 0.14);
-    color: var(--accent);
+    background: rgba(30, 136, 229, 0.14);
+    color: var(--primary);
     font-size: 1.1rem;
     font-weight: 600;
 }}
@@ -642,29 +666,28 @@ button:focus-visible {{
     margin: 0;
     font-size: calc(0.9rem * var(--base-font-scale));
     color: var(--text-subtle);
-    font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
 }}
 
 .form-card__body {{
     display: flex;
     flex-direction: column;
-    gap: 1.2rem;
+    gap: 20px;
 }}
 
 .wizard-stepper {{
-    margin: 1rem 0 1.4rem;
-    padding: 1.3rem 1.6rem;
-    border-radius: 26px;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(231, 236, 247, 0.92) 100%);
-    border: 1px solid rgba(15, 44, 79, 0.1);
-    box-shadow: 0 22px 40px rgba(6, 19, 37, 0.12);
+    margin: 24px 0;
+    padding: 24px 28px;
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-soft);
 }}
 
 .wizard-stepper__progress {{
     position: relative;
     height: 8px;
     border-radius: 999px;
-    background: rgba(15, 44, 79, 0.1);
+    background: rgba(11, 31, 59, 0.1);
     margin-bottom: 1.1rem;
     overflow: hidden;
 }}
@@ -672,7 +695,7 @@ button:focus-visible {{
 .wizard-stepper__progress-bar {{
     position: absolute;
     inset: 0;
-    background: linear-gradient(135deg, rgba(28, 106, 216, 0.85) 0%, rgba(52, 124, 214, 0.85) 100%);
+    background: linear-gradient(135deg, rgba(30, 136, 229, 0.85) 0%, rgba(52, 124, 214, 0.85) 100%);
     border-radius: inherit;
     transition: width 0.4s ease;
 }}
@@ -682,49 +705,49 @@ button:focus-visible {{
     margin: 0;
     padding: 0;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
 }}
 
 .wizard-stepper__item {{
-    background: rgba(15, 44, 79, 0.04);
-    border-radius: 20px;
-    padding: 0.75rem 1rem;
+    background: var(--surface-alt);
+    border-radius: var(--radius-lg);
+    padding: 12px 16px;
     display: flex;
     align-items: flex-start;
-    gap: 0.65rem;
-    border: 1px solid rgba(15, 44, 79, 0.08);
-    min-height: 4.2rem;
+    gap: 10px;
+    border: 1px solid var(--border-color);
+    min-height: 72px;
 }}
 
 .wizard-stepper__item--completed {{
-    background: rgba(28, 106, 216, 0.08);
-    border-color: rgba(28, 106, 216, 0.18);
+    background: rgba(60, 122, 94, 0.12);
+    border-color: rgba(60, 122, 94, 0.3);
 }}
 
 .wizard-stepper__item--current {{
-    background: linear-gradient(140deg, rgba(28, 106, 216, 0.2) 0%, rgba(15, 44, 79, 0.16) 100%);
-    border-color: rgba(28, 106, 216, 0.3);
-    box-shadow: 0 20px 36px rgba(28, 106, 216, 0.18);
+    background: rgba(30, 136, 229, 0.12);
+    border-color: rgba(30, 136, 229, 0.3);
+    box-shadow: 0 16px 28px rgba(30, 136, 229, 0.18);
 }}
 
 .wizard-stepper__bullet {{
-    width: 2.2rem;
-    height: 2.2rem;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
-    background: rgba(28, 106, 216, 0.16);
-    color: var(--accent);
+    background: rgba(30, 136, 229, 0.16);
+    color: var(--primary);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     font-weight: 600;
-    font-size: 1.05rem;
+    font-size: 1rem;
 }}
 
 .wizard-stepper__text {{
     display: flex;
     flex-direction: column;
-    gap: 0.2rem;
+    gap: 4px;
 }}
 
 .wizard-stepper__step-index {{
@@ -737,7 +760,7 @@ button:focus-visible {{
 .wizard-stepper__title {{
     font-size: calc(0.98rem * var(--base-font-scale));
     font-weight: 600;
-    color: var(--accent);
+    color: var(--primary);
 }}
 
 .wizard-stepper__description {{
@@ -748,41 +771,41 @@ button:focus-visible {{
 .wizard-stepper__meta {{
     display: flex;
     flex-wrap: wrap;
-    gap: 0.75rem;
+    gap: 12px;
     font-size: calc(0.85rem * var(--base-font-scale));
     color: var(--text-subtle);
-    margin-bottom: 0.4rem;
+    margin-bottom: 8px;
 }}
 
 .formula-highlight {{
     display: flex;
     align-items: center;
-    gap: 1rem;
-    padding: 1rem 1.2rem;
-    border-radius: 20px;
-    background: linear-gradient(120deg, rgba(28, 106, 216, 0.12) 0%, rgba(231, 236, 247, 0.8) 100%);
-    border: 1px solid rgba(15, 44, 79, 0.12);
-    box-shadow: 0 18px 34px rgba(6, 19, 37, 0.08);
-    margin: 1.1rem 0;
+    gap: 16px;
+    padding: 16px 20px;
+    border-radius: var(--radius-lg);
+    background: var(--surface-alt);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-subtle);
+    margin: 16px 0;
 }}
 
 .formula-highlight__icon {{
-    width: 2.4rem;
-    height: 2.4rem;
+    width: 40px;
+    height: 40px;
     border-radius: 999px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: rgba(28, 106, 216, 0.16);
-    color: var(--accent);
-    font-size: 1.2rem;
+    background: rgba(30, 136, 229, 0.16);
+    color: var(--primary);
+    font-size: 1.1rem;
     font-weight: 600;
 }}
 
 .formula-highlight__body strong {{
     display: block;
-    margin-bottom: 0.2rem;
-    font-size: calc(1.02rem * var(--base-font-scale));
+    margin-bottom: 4px;
+    font-size: calc(1rem * var(--base-font-scale));
 }}
 
 .formula-highlight__body p {{
@@ -792,21 +815,21 @@ button:focus-visible {{
 }}
 
 .context-hint {{
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 20px;
-    padding: 1rem 1.2rem;
-    border: 1px solid rgba(15, 44, 79, 0.1);
-    box-shadow: 0 18px 30px rgba(6, 19, 37, 0.08);
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: 16px 20px;
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-subtle);
     display: flex;
     flex-direction: column;
-    gap: 0.45rem;
-    margin-bottom: 1rem;
+    gap: 8px;
+    margin-bottom: 16px;
 }}
 
 .context-hint__title {{
     font-weight: 600;
     font-size: calc(0.95rem * var(--base-font-scale));
-    color: var(--accent);
+    color: var(--primary);
 }}
 
 .context-hint__summary {{
@@ -817,10 +840,10 @@ button:focus-visible {{
 
 .context-hint__metrics {{
     margin: 0;
-    padding-left: 1.1rem;
+    padding-left: 20px;
     display: grid;
-    gap: 0.2rem;
-    font-size: calc(0.82rem * var(--base-font-scale));
+    gap: 4px;
+    font-size: calc(0.84rem * var(--base-font-scale));
     color: var(--text-subtle);
 }}
 
@@ -829,24 +852,24 @@ button:focus-visible {{
 }}
 
 .context-hint__link {{
-    font-size: calc(0.82rem * var(--base-font-scale));
-    color: var(--primary);
+    font-size: calc(0.84rem * var(--base-font-scale));
+    color: var(--accent);
     text-decoration: underline;
 }}
 
 .security-panel {{
-    margin-top: 1.2rem;
-    padding: 1.25rem 1.4rem;
-    border-radius: 18px;
-    background: rgba(28, 106, 216, 0.08);
-    border: 1px solid rgba(15, 44, 79, 0.14);
-    box-shadow: 0 18px 36px rgba(6, 19, 37, 0.08);
+    margin-top: 24px;
+    padding: 20px 24px;
+    border-radius: var(--radius-lg);
+    background: rgba(11, 31, 59, 0.06);
+    border: 1px solid rgba(11, 31, 59, 0.15);
+    box-shadow: var(--shadow-subtle);
 }}
 
 .security-panel__lead {{
-    margin: 0 0 0.6rem 0;
+    margin: 0 0 8px 0;
     font-weight: 600;
-    color: var(--accent);
+    color: var(--primary);
 }}
 
 .security-panel__badges {{
@@ -875,13 +898,13 @@ button:focus-visible {{
 .app-footer__trust {{
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 8px;
 }}
 
 .app-footer__security {{
     display: flex;
     flex-wrap: wrap;
-    gap: 0.45rem;
+    gap: 8px;
 }}
 
 .security-badge {{
@@ -890,11 +913,11 @@ button:focus-visible {{
     gap: 0.3rem;
     padding: 0.35rem 0.7rem;
     border-radius: 999px;
-    background: rgba(28, 106, 216, 0.14);
+    background: rgba(30, 136, 229, 0.14);
     color: var(--accent);
     font-size: calc(0.82rem * var(--base-font-scale));
     font-weight: 600;
-    border: 1px solid rgba(15, 44, 79, 0.14);
+    border: 1px solid rgba(11, 31, 59, 0.14);
 }}
 
 .app-footer__security-text {{
@@ -914,8 +937,8 @@ button:focus-visible {{
     align-items: center;
     padding: 0.3rem 0.65rem;
     border-radius: 8px;
-    background: rgba(15, 44, 79, 0.1);
-    color: var(--accent);
+    background: rgba(11, 31, 59, 0.1);
+    color: var(--primary);
     font-size: calc(0.8rem * var(--base-font-scale));
     font-weight: 600;
     letter-spacing: 0.02em;
@@ -931,12 +954,12 @@ button:focus-visible {{
     width: 2.2rem;
     height: 2.2rem;
     border-radius: 16px;
-    background: rgba(28, 106, 216, 0.14);
+    background: rgba(30, 136, 229, 0.14);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     font-weight: 600;
-    color: var(--accent);
+    color: var(--primary);
 }}
 
 .app-footer__brand-name {{
@@ -958,7 +981,7 @@ button:focus-visible {{
 }}
 
 .app-footer__links a {{
-    color: var(--primary);
+    color: var(--accent);
     text-decoration: underline;
 }}
 
@@ -970,14 +993,14 @@ button:focus-visible {{
 
 .wizard-checklist {{
     display: grid;
-    gap: 0.35rem;
-    padding: 0.4rem 0;
+    gap: 8px;
+    padding: 8px 0;
 }}
 
 .wizard-checklist__item {{
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 8px;
     font-size: calc(0.92rem * var(--base-font-scale));
 }}
 
@@ -995,11 +1018,11 @@ button:focus-visible {{
 [data-testid="stMetric"] {{
     position: relative;
     overflow: hidden;
-    background: linear-gradient(155deg, rgba(255, 255, 255, 0.95) 0%, rgba(231, 236, 247, 0.9) 100%);
-    border-radius: 18px;
-    padding: 1rem 1.25rem;
-    box-shadow: 0 16px 28px rgba(6, 19, 37, 0.1);
-    border: 1px solid rgba(15, 44, 79, 0.08);
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    box-shadow: var(--shadow-subtle);
+    border: 1px solid var(--border-color);
 }}
 
 [data-testid="stMetric"]::after {{
@@ -1009,7 +1032,7 @@ button:focus-visible {{
     right: -30px;
     width: 110px;
     height: 110px;
-    background: radial-gradient(circle at center, rgba(28, 106, 216, 0.16), transparent 70%);
+    background: radial-gradient(circle at center, rgba(30, 136, 229, 0.16), transparent 70%);
 }}
 
 [data-testid="stMetric"] [data-testid="stMetricLabel"] {{
@@ -1018,24 +1041,24 @@ button:focus-visible {{
 }}
 
 [data-testid="stMetric"] [data-testid="stMetricValue"] {{
-    color: var(--primary);
+    color: var(--accent);
     font-weight: 700;
-    font-size: calc(1.35rem * var(--base-font-scale));
+    font-size: calc(1.3rem * var(--base-font-scale));
 }}
 
 [data-testid="stDataFrame"] {{
-    background: linear-gradient(160deg, rgba(255, 255, 255, 0.98) 0%, rgba(231, 236, 247, 0.92) 100%);
-    border-radius: 18px;
-    padding: 0.7rem 0.9rem 1rem 0.9rem;
-    box-shadow: 0 16px 28px rgba(6, 19, 37, 0.08);
-    border: 1px solid rgba(15, 44, 79, 0.08);
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    padding: 12px 16px 16px 16px;
+    box-shadow: var(--shadow-subtle);
+    border: 1px solid var(--border-color);
 }}
 
 button[kind="primary"] {{
-    background: linear-gradient(135deg, rgba(28, 106, 216, 0.95) 0%, rgba(26, 96, 192, 0.95) 100%);
+    background: linear-gradient(135deg, rgba(30, 136, 229, 0.95) 0%, rgba(26, 96, 192, 0.95) 100%);
     border-radius: 999px;
-    border: 1px solid rgba(15, 44, 79, 0.18);
-    box-shadow: 0 18px 30px rgba(28, 106, 216, 0.25);
+    border: 1px solid rgba(11, 31, 59, 0.18);
+    box-shadow: 0 18px 30px rgba(30, 136, 229, 0.25);
     color: #FFFFFF;
     letter-spacing: 0.02em;
     font-weight: 600;
@@ -1051,10 +1074,10 @@ button[kind="primary"]:focus-visible {{
 }}
 
 .field-error {{
-    border: 1px solid rgba(138, 53, 66, 0.5);
-    border-radius: 14px;
-    padding: 0.85rem;
-    background-color: rgba(138, 53, 66, 0.1);
+    border: 1px solid rgba(181, 80, 74, 0.5);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    background-color: rgba(181, 80, 74, 0.08);
     color: var(--negative);
 }}
 
