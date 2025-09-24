@@ -43,11 +43,31 @@ def render_home_page() -> None:
             """
             <div class="hero-card">
                 <h1>McKinsey Inspired 経営計画ダッシュボード</h1>
-                <p>チャネル×商品×月次の売上設計からKPI分析、シナリオ比較、ドキュメント出力までを一気通貫で支援します。</p>
+                <p>小規模事業者のためのAI駆動型経営計画スタジオ。財務モデリングから戦略立案、レポート化までを1つのワークスペースで完結させ、投資家や金融機関への説明資料をプロフェッショナル品質で仕上げます。</p>
             </div>
             """,
             unsafe_allow_html=True,
         )
+
+    st.markdown(
+        """
+        <div class="trust-badges" role="list" aria-label="信頼性に関するバッジ">
+            <div class="trust-badge" role="listitem">
+                <span class="trust-badge__icon" aria-hidden="true">🛡️</span>
+                <span class="trust-badge__text">データは暗号化され、ISO/IEC 27001準拠インフラに保存</span>
+            </div>
+            <div class="trust-badge" role="listitem">
+                <span class="trust-badge__icon" aria-hidden="true">👔</span>
+                <span class="trust-badge__text">中小企業診断士監修｜最新の経営フレームワークでアルゴリズムを設計</span>
+            </div>
+            <div class="trust-badge" role="listitem">
+                <span class="trust-badge__icon" aria-hidden="true">🤖</span>
+                <span class="trust-badge__text">AIアシスタントがシナリオ比較と意思決定メモを自動生成</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     settings_state: Dict[str, object] = st.session_state.get("finance_settings", {})
     unit = str(settings_state.get("unit", "百万円"))
@@ -130,8 +150,8 @@ def render_home_page() -> None:
     if not auth.is_authenticated():
         render_callout(
             icon="▣",
-            title="ログインするとクラウド保存とバージョン管理が利用できます",
-            body="ヘッダー右上のログインからアカウントを作成すると、入力データをクラウドに保存し、シナリオ別にバージョン管理できます。",
+            title="ログインでセキュアなクラウド保存とバージョン管理を利用",
+            body="ヘッダー右上の「ログイン」からアカウントを作成すると、暗号化ストレージに入力データを保存し、シナリオごとにバージョン履歴を管理できます。",
             tone="caution",
             aria_label="ログインを促す案内",
         )
@@ -150,11 +170,11 @@ def render_home_page() -> None:
     )
     st.markdown(
         """
-        1. **入力** ページで売上・原価・費用・投資・借入・税制を登録する
-        2. **分析** ページでPL/BS/CFとKPIを確認し、損益分岐点や資金繰りをチェック
-        3. **シナリオ** ページで感度分析やシナリオ比較を行い、意思決定を支援
-        4. **レポート** ページでPDF / Excel / Word を生成し、ステークホルダーと共有
-        5. **設定** ページで単位や言語、既定値をカスタマイズ
+        1. **入力** ページで売上・原価・費用・投資・借入・税制を登録し、前提条件を整備する
+        2. **分析** ページでPL/BS/CFとKPIを確認し、損益分岐点や資金繰りの健全性を評価する
+        3. **シナリオ** ページで感度分析やシナリオ比較を行い、経営判断の優先順位を明確化する
+        4. **レポート** ページでPDF / PowerPoint / Excel / Word を生成し、金融機関・投資家・社内会議へ展開する
+        5. **設定** ページで単位や言語、セキュリティオプションなど既定値をカスタマイズする
         """
     )
 
