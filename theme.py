@@ -218,6 +218,54 @@ h1, h2, h3, h4, h5, h6,
     content: "⚙";
 }}
 
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child a::before {{
+    content: "⌂";
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child a span,
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Home"] span,
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Inputs"] span,
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Analysis"] span,
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Scenarios"] span,
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Report"] span,
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Settings"] span {{
+    font-size: 0;
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a span::after {{
+    font-size: calc(1rem - 0.2rem * var(--sidebar-compact));
+    color: #F7FAFC;
+    letter-spacing: 0.02em;
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child a span::after {{
+    content: "ホーム";
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Home"] span::after {{
+    content: "概要";
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Inputs"] span::after {{
+    content: "入力";
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Analysis"] span::after {{
+    content: "分析";
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Scenarios"] span::after {{
+    content: "シナリオ";
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Report"] span::after {{
+    content: "レポート";
+}}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Settings"] span::after {{
+    content: "設定";
+}}
+
 [data-testid="stSidebar"] button:focus-visible,
 button:focus-visible {{
     outline: 3px solid var(--accent) !important;

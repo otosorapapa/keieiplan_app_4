@@ -1163,7 +1163,7 @@ def build_dscr_timeseries(
     return pd.DataFrame(grouped_rows)
 
 st.set_page_config(
-    page_title="経営計画スタジオ｜Analysis",
+    page_title="経営計画スタジオ｜分析",
     page_icon="▥",
     layout="wide",
 )
@@ -1182,7 +1182,7 @@ tax_policy = _coerce_tax_policy(bundle.tax)
 if tax_policy is None:
     tax_policy = DEFAULT_TAX_POLICY.model_copy(deep=True)
 if not has_custom_inputs:
-    st.info("Inputsページでデータを保存すると、分析結果が更新されます。以下は既定値サンプルです。")
+    st.info("入力ページでデータを保存すると、分析結果が更新されます。以下は既定値サンプルです。")
 
 plan_cfg = plan_from_models(
     bundle.sales,
@@ -2515,7 +2515,7 @@ with trend_tab:
     fiscal_year_int = fiscal_year  # fiscal_year is derived from settings_state earlier
     financial_series_df = _financial_series_from_state(fiscal_year_int)
     if financial_series_df.empty:
-        st.info("Inputsページの『税制・保存』ステップで財務指標を入力すると、ここに多年度の分析が表示されます。")
+        st.info("入力ページの「税制・保存」ステップで財務指標を入力すると、ここに多年度の分析が表示されます。")
     else:
         metrics_timeseries = _compute_financial_metrics_table(
             financial_series_df, tax_policy, fiscal_year_int
@@ -2794,7 +2794,7 @@ with strategy_tab:
     st.subheader("マーケティング戦略サマリー")
     marketing_state = st.session_state.get(MARKETING_STRATEGY_KEY, {})
     if not marketing_state_has_content(marketing_state):
-        st.info("Inputsページ『ビジネスモデル整理』ステップで4P/3C情報を入力すると、ここに提案が表示されます。")
+        st.info("入力ページ「ビジネスモデル整理」ステップで4P/3C情報を入力すると、ここに提案が表示されます。")
     else:
         business_context = st.session_state.get(BUSINESS_CONTEXT_KEY, {})
         marketing_summary = generate_marketing_recommendations(marketing_state, business_context)
@@ -2817,7 +2817,7 @@ with strategy_tab:
                 if lines:
                     st.markdown("\n".join(f"- {line}" for line in lines))
                 else:
-                    st.markdown("- 提案を生成するにはInputsページで詳細を入力してください。")
+                    st.markdown("- 提案を生成するには入力ページで詳細を入力してください。")
 
         st.markdown("**顧客価値提案 (UVP)**")
         st.write(marketing_summary.get("uvp", ""))
@@ -2852,7 +2852,7 @@ with strategy_tab:
     pest_df = _pest_dataframe(pest_records)
 
     if swot_df.empty and pest_df.empty:
-        st.info("Inputsページ『ビジネスモデル整理』ステップでSWOT/PESTを入力すると、ここに分析結果が表示されます。")
+        st.info("入力ページ「ビジネスモデル整理」ステップでSWOT/PESTを入力すると、ここに分析結果が表示されます。")
     else:
         if not swot_df.empty:
             st.markdown("#### SWOTマトリクス")
@@ -2880,7 +2880,7 @@ with strategy_tab:
                     **use_container_width_kwargs(st.dataframe),
                 )
         else:
-            st.info("SWOTの入力が未登録のため、マトリクスを表示できません。Inputsページで要因を整理してください。")
+            st.info("SWOTの入力が未登録のため、マトリクスを表示できません。入力ページで要因を整理してください。")
 
         if not pest_df.empty:
             st.markdown("#### PEST分析サマリー")

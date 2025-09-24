@@ -19,7 +19,7 @@ from theme import inject_theme
 from ui.streamlit_compat import use_container_width_kwargs
 
 st.set_page_config(
-    page_title="経営計画スタジオ｜Scenarios",
+    page_title="経営計画スタジオ｜シナリオ",
     page_icon="∑",
     layout="wide",
 )
