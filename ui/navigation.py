@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import textwrap
 import streamlit as st
 
 
@@ -136,15 +137,17 @@ def render_workflow_banner(current_key: str) -> None:
             status = "current"
         aria_current = " aria-current=\"step\"" if status == "current" else ""
         fragments.append(
-            """
-            <li class='workflow-banner__item workflow-banner__item--{status}'{aria_current}>
-              <span class='workflow-banner__badge'>{badge}</span>
-              <div class='workflow-banner__label'>
-                <span class='workflow-banner__label-text'>{icon} {label}</span>
-                <span class='workflow-banner__description'>{desc}</span>
-              </div>
-            </li>
-            """.format(
+            textwrap.dedent(
+                """
+                <li class='workflow-banner__item workflow-banner__item--{status}'{aria_current}>
+                  <span class='workflow-banner__badge'>{badge}</span>
+                  <div class='workflow-banner__label'>
+                    <span class='workflow-banner__label-text'>{icon} {label}</span>
+                    <span class='workflow-banner__description'>{desc}</span>
+                  </div>
+                </li>
+                """
+            ).format(
                 status=status,
                 aria_current=aria_current,
                 badge=f"{idx + 1:02d}",
@@ -161,7 +164,7 @@ def render_workflow_banner(current_key: str) -> None:
     else:
         next_step_text = WORKFLOW_ITEMS[current_index + 1].label
 
-    st.markdown(
+    banner_html = textwrap.dedent(
         """
         <section class='workflow-banner' aria-label='ユーザージャーニー'>
           <header class='workflow-banner__title'>入力からレポートまでの進行状況</header>
@@ -170,7 +173,8 @@ def render_workflow_banner(current_key: str) -> None:
           </ol>
           <div class='workflow-banner__meta'>次のステップ: {next_step}</div>
         </section>
-        """.format(items="".join(fragments), next_step=next_step_text),
-        unsafe_allow_html=True,
-    )
+        """
+    ).format(items="".join(fragments), next_step=next_step_text)
+
+    st.markdown(banner_html, unsafe_allow_html=True)
 
