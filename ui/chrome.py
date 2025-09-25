@@ -8,7 +8,7 @@ import html
 import streamlit as st
 from services import auth
 from services.auth import AuthError
-from ui.streamlit_compat import use_container_width_kwargs
+from ui.streamlit_compat import rerun, use_container_width_kwargs
 
 USAGE_GUIDE_TEXT = (
     "1. **入力を整える**: コントロールハブで売上・コストのレバーと会計年度、FTEを設定します。\n"
@@ -121,7 +121,7 @@ def render_app_header(
                         auth.logout_user()
                         st.toast("ログアウトしました。", icon="◇")
                         logout_requested = True
-                        st.experimental_rerun()
+                        rerun()
                 else:
                     login_tab, register_tab = st.tabs(["ログイン", "新規登録"])
                     with login_tab:
@@ -140,7 +140,7 @@ def render_app_header(
                                 try:
                                     auth.login_user(login_email, login_password)
                                     st.success("ログインしました。ページを更新します。")
-                                    st.experimental_rerun()
+                                    rerun()
                                 except AuthError as exc:
                                     st.error(str(exc))
                     with register_tab:
@@ -170,7 +170,7 @@ def render_app_header(
                                     )
                                     auth.login_via_token(user)
                                     st.success("アカウントを作成しました。ページを更新します。")
-                                    st.experimental_rerun()
+                                    rerun()
                                 except AuthError as exc:
                                     st.error(str(exc))
         if show_reset:

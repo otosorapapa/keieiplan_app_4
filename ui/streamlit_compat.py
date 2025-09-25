@@ -4,6 +4,8 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable, Dict
 
+import streamlit as st
+
 ComponentCallable = Callable[..., Any]
 
 _ACCEPTS_CACHE: Dict[int, bool] = {}
@@ -60,4 +62,13 @@ def use_container_width_kwargs(
     return {}
 
 
-__all__ = ["use_container_width_kwargs"]
+def rerun() -> None:
+    """Trigger a rerun across supported Streamlit versions."""
+
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:  # pragma: no cover - legacy fallback
+        st.experimental_rerun()
+
+
+__all__ = ["use_container_width_kwargs", "rerun"]
