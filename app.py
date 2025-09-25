@@ -6,8 +6,8 @@ import streamlit as st
 from views import render_home_page
 
 st.set_page_config(
-    page_title="経営計画スタジオ",
-    page_icon="▥",
+    page_title="経営ダッシュボード",
+    page_icon=":bar_chart:",
     layout="wide",
 )
 
