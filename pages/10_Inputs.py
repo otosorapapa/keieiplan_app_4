@@ -33,6 +33,7 @@ from calc import compute, generate_cash_flow, plan_from_models, summarize_plan_m
 from pydantic import ValidationError
 from state import ensure_session_defaults
 from services import auth
+from services.ai_writer import BusinessContextGenerator, GenerationError
 from services.auth import AuthError
 from services.fermi_learning import range_profile_from_estimate, update_learning_state
 from services.marketing_strategy import (
@@ -585,6 +586,11 @@ INPUT_WIZARD_STEP_KEY = "input_wizard_step"
 BUSINESS_CONTEXT_KEY = "business_context"
 INDUSTRY_TEMPLATE_KEY = "selected_industry_template"
 
+AI_CONTEXT_MESSAGE_KEY = "business_context_ai_message"
+AI_CONTEXT_HIGHLIGHTS_KEY = "business_context_ai_highlights"
+BUSINESS_CONTEXT_GENERATOR = BusinessContextGenerator()
+AI_TONE_PRESETS = BUSINESS_CONTEXT_GENERATOR.tone_presets()
+
 FERMI_RESULT_STATE_KEY = "fermi_last_estimate"
 COST_RANGE_STATE_KEY = "cost_range_profiles"
 FINANCIAL_SERIES_STATE_KEY = "financial_timeseries"
@@ -660,6 +666,13 @@ BUSINESS_CONTEXT_TEMPLATE = {
     "bmc_value_proposition": "",
     "bmc_channels": "",
     "qualitative_memo": "",
+    "ai_industry": "",
+    "ai_business_model": "",
+    "ai_target_customer": "",
+    "ai_product": "",
+    "ai_keywords": "",
+    "ai_tone": "standard",
+    "ai_last_profile": "",
 }
 
 BUSINESS_CONTEXT_PLACEHOLDER = {
@@ -2675,6 +2688,8 @@ if INPUT_WIZARD_STEP_KEY not in st.session_state:
 if BUSINESS_CONTEXT_KEY not in st.session_state:
     st.session_state[BUSINESS_CONTEXT_KEY] = BUSINESS_CONTEXT_TEMPLATE.copy()
 context_state: Dict[str, str] = st.session_state[BUSINESS_CONTEXT_KEY]
+for context_key, default_value in BUSINESS_CONTEXT_TEMPLATE.items():
+    context_state.setdefault(context_key, default_value)
 
 if (
     MARKETING_STRATEGY_KEY not in st.session_state
@@ -2814,6 +2829,123 @@ if current_step == "context":
     else:
         st.caption("保存ステータス: 入力内容は自動保存されます。")
 
+
+    with form_card(
+        title="AI文章アシスタント",
+        subtitle="業種・業態のキーワードから3C/BMCの草案を生成",
+        icon="✨",
+    ):
+        st.caption("業種やビジネスモデルを入力すると、主要な文章をAIが自動で下書きします。生成後に各欄で調整してください。")
+        message_container = st.container()
+        current_message = st.session_state.get(AI_CONTEXT_MESSAGE_KEY)
+        if current_message:
+            renderer = {
+                "success": st.success,
+                "error": st.error,
+                "warning": st.warning,
+                "info": st.info,
+            }.get(str(current_message.get("type", "success")), st.info)
+            with message_container:
+                renderer(str(current_message.get("text", "")))
+                highlights = st.session_state.get(AI_CONTEXT_HIGHLIGHTS_KEY) or []
+                if highlights:
+                    st.markdown("\n".join(f"- {item}" for item in highlights))
+        last_profile = context_state.get("ai_last_profile")
+        if last_profile:
+            st.caption(f"前回生成：{last_profile}向けの草案")
+
+        ai_input_cols = st.columns(2, gap="large")
+        with ai_input_cols[0]:
+            context_state["ai_industry"] = st.text_input(
+                "業種・市場",
+                value=context_state.get("ai_industry", ""),
+                placeholder="例：製造業向けSaaS / 地域密着型クリニック",
+            )
+            context_state["ai_business_model"] = st.text_input(
+                "ビジネスモデル / 業態",
+                value=context_state.get("ai_business_model", ""),
+                placeholder="例：サブスクリプション、フランチャイズ、D2C",
+            )
+        with ai_input_cols[1]:
+            context_state["ai_target_customer"] = st.text_input(
+                "想定顧客像",
+                value=context_state.get("ai_target_customer", ""),
+                placeholder="例：年商10〜50億円の製造業 生産管理部門",
+            )
+            context_state["ai_product"] = st.text_input(
+                "主要サービス / 商品",
+                value=context_state.get("ai_product", ""),
+                placeholder="例：IoT連携型生産管理クラウド",
+            )
+
+        context_state["ai_keywords"] = st.text_area(
+            "強調したいキーワード（任意）",
+            value=context_state.get("ai_keywords", ""),
+            placeholder="例：サプライチェーンDX、伴走支援、LTV最大化",
+            height=92,
+        )
+
+        tone_options = list(AI_TONE_PRESETS.keys())
+        default_tone = context_state.get("ai_tone", "standard")
+        if default_tone not in AI_TONE_PRESETS:
+            default_tone = "standard"
+        selected_tone = st.selectbox(
+            "文体",
+            tone_options,
+            index=tone_options.index(default_tone),
+            format_func=lambda value: AI_TONE_PRESETS.get(value, value),
+        )
+        context_state["ai_tone"] = selected_tone
+
+        action_cols = st.columns([2, 1], gap="medium")
+        with action_cols[0]:
+            generate_clicked = st.button(
+                "AIで草案を生成",
+                key="ai_generate_business_context",
+                type="primary",
+                **use_container_width_kwargs(st.button),
+            )
+        with action_cols[1]:
+            clear_clicked = st.button(
+                "提案メモをクリア",
+                key="ai_clear_business_context",
+                **use_container_width_kwargs(st.button),
+            )
+
+        if clear_clicked:
+            st.session_state.pop(AI_CONTEXT_MESSAGE_KEY, None)
+            st.session_state.pop(AI_CONTEXT_HIGHLIGHTS_KEY, None)
+            st.toast("AI提案メモをクリアしました。", icon="🧹")
+            st.experimental_rerun()
+
+        if generate_clicked:
+            try:
+                suggestion = BUSINESS_CONTEXT_GENERATOR.generate_business_context(
+                    industry=context_state.get("ai_industry", ""),
+                    business_model=context_state.get("ai_business_model", ""),
+                    target_customer=context_state.get("ai_target_customer", ""),
+                    product=context_state.get("ai_product", ""),
+                    keywords=context_state.get("ai_keywords", ""),
+                    tone=context_state.get("ai_tone", "standard"),
+                )
+            except GenerationError as exc:
+                st.session_state[AI_CONTEXT_MESSAGE_KEY] = {
+                    "type": "error",
+                    "text": str(exc),
+                }
+                st.session_state[AI_CONTEXT_HIGHLIGHTS_KEY] = []
+            else:
+                for field_key, field_value in suggestion.fields.items():
+                    context_state[field_key] = field_value
+                context_state["ai_last_profile"] = suggestion.profile_name
+                st.session_state[AI_CONTEXT_MESSAGE_KEY] = {
+                    "type": "success",
+                    "text": f"{suggestion.profile_name}向けの草案を挿入しました（文体：{suggestion.tone_label}）。",
+                }
+                st.session_state[AI_CONTEXT_HIGHLIGHTS_KEY] = suggestion.highlights
+            st.experimental_rerun()
+
+        st.caption("※ 生成結果は自動保存されるため、各入力欄で必要に応じて加筆・修正してください。")
 
     with form_card(
         title="3C分析サマリー",
