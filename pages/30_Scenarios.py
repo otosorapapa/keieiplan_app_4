@@ -1,6 +1,7 @@
 """Scenario planning and sensitivity analysis dashboard."""
 from __future__ import annotations
 
+from collections import OrderedDict
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, List, Tuple
 
@@ -10,6 +11,7 @@ import math
 import numpy as np
 import pandas as pd
 import streamlit as st
+import plotly.graph_objects as go
 
 from calc import compute, generate_cash_flow, plan_from_models, summarize_plan_metrics
 from formatting import format_amount_with_unit, format_delta
@@ -37,6 +39,25 @@ DRIVER_LABELS: Dict[str, str] = {
     "cost": "原価率",
     "fixed": "固定費",
 }
+
+SCENARIO_BAR_COLOR = "#4C78A8"
+SCENARIO_HIGHLIGHT_COLOR = "#F58518"
+
+PLOTLY_DOWNLOAD_OPTIONS = {
+    "format": "png",
+    "height": 600,
+    "width": 1000,
+    "scale": 2,
+}
+
+
+def plotly_download_config(name: str) -> Dict[str, object]:
+    """Return Plotly configuration with download button defaults."""
+
+    return {
+        "displaylogo": False,
+        "toImageButtonOptions": {"filename": name, **PLOTLY_DOWNLOAD_OPTIONS},
+    }
 
 METRIC_LABELS: Dict[str, str] = {
     "sales": "売上高",
@@ -89,6 +110,23 @@ DEFAULT_SCENARIOS: Dict[str, Dict[str, object]] = {
         "fixed_pct": 3.0,
         "notes": "需要減少とコスト上昇",
     },
+}
+
+DRIVER_PRESET_LEVELS: OrderedDict[str, float] = OrderedDict(
+    [
+        ("大幅減", -12.0),
+        ("減", -6.0),
+        ("現状維持", 0.0),
+        ("増", 6.0),
+        ("大幅増", 12.0),
+    ]
+)
+
+DRIVER_PRESET_HINTS: Dict[str, str] = {
+    "customers": "大型キャンペーンや新規開拓を想定した集客の揺らぎを即座に適用できます。",
+    "price": "値上げ・値引きシナリオを数クリックで切り替えられます。",
+    "cost": "原材料高騰や歩留まり改善など、原価率の揺らぎを即座に反映します。",
+    "fixed": "採用計画や広告宣伝費の増減など固定費の前提をテンプレート化します。",
 }
 
 SCENARIO_PRESETS: Dict[str, Dict[str, object]] = {
@@ -197,6 +235,142 @@ def _default_scenario_dataframe() -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows, columns=SCENARIO_COLUMNS)
+
+
+def _apply_driver_presets(
+    df: pd.DataFrame,
+    *,
+    target_keys: List[str],
+    driver_levels: Dict[str, str],
+) -> pd.DataFrame:
+    """Return dataframe with preset percentages applied to selected rows."""
+
+    if df.empty or not target_keys:
+        return df
+    updated_records: List[Dict[str, object]] = []
+    for record in df.to_dict("records"):
+        if record["key"] not in target_keys:
+            updated_records.append(record)
+            continue
+        new_record = record.copy()
+        for driver_key, preset_label in driver_levels.items():
+            pct_value = DRIVER_PRESET_LEVELS.get(preset_label, 0.0)
+            column = f"{driver_key}_pct"
+            if column in new_record:
+                new_record[column] = _clamp_pct(pct_value, minimum=-50.0, maximum=50.0)
+        updated_records.append(new_record)
+    return pd.DataFrame(updated_records, columns=SCENARIO_COLUMNS)
+
+
+def _move_scenario_row(df: pd.DataFrame, index: int, offset: int) -> pd.DataFrame:
+    """Move a scenario row up or down by *offset* positions."""
+
+    if df.empty:
+        return df
+    new_index = index + offset
+    if new_index < 0 or new_index >= len(df):
+        return df
+    rows = df.to_dict("records")
+    rows.insert(new_index, rows.pop(index))
+    return pd.DataFrame(rows, columns=SCENARIO_COLUMNS)
+
+
+def _duplicate_scenario_row(df: pd.DataFrame, index: int) -> pd.DataFrame:
+    """Duplicate a scenario row and append it with a unique identifier."""
+
+    if df.empty or index < 0 or index >= len(df):
+        return df
+    rows = df.to_dict("records")
+    base_record = rows[index].copy()
+    base_key = str(base_record.get("key", "scenario"))
+    base_name = str(base_record.get("name", "シナリオ"))
+    suffix = 1
+    existing_keys = {str(row.get("key")) for row in rows}
+    while f"{base_key}_copy{suffix}" in existing_keys:
+        suffix += 1
+    base_record["key"] = f"{base_key}_copy{suffix}"
+    base_record["name"] = f"{base_name} (コピー{suffix})"
+    rows.insert(index + 1, base_record)
+    return pd.DataFrame(rows, columns=SCENARIO_COLUMNS)
+
+
+def _render_scenario_cards(df: pd.DataFrame) -> pd.DataFrame:
+    """Render scenario cards with inline actions and return potential updates."""
+
+    if df.empty:
+        st.info("シナリオがありません。プリセットから追加してください。")
+        return df
+
+    records = df.to_dict("records")
+    updated_df = df
+    st.markdown("#### カードビュー")
+    st.caption(
+        "カード右上のボタンで順番入れ替え・複製・削除ができます。"
+        "シナリオの概要を俯瞰し、メモの整理にも便利です。"
+    )
+    for index, record in enumerate(records):
+        key = record.get("key", f"scenario_{index}")
+        header_cols = st.columns([6, 1, 1, 1, 1])
+        with header_cols[0]:
+            st.markdown(f"**{record.get('name', f'Scenario {index+1}')}**")
+            adjustment = \
+                f"客数 {record.get('customers_pct', 0):+.1f}% ｜ " \
+                f"単価 {record.get('price_pct', 0):+.1f}% ｜ " \
+                f"原価率 {record.get('cost_pct', 0):+.1f}% ｜ " \
+                f"固定費 {record.get('fixed_pct', 0):+.1f}%"
+            st.caption(adjustment)
+        move_up = header_cols[1].button("▲", key=f"scenario_move_up_{key}", disabled=index == 0)
+        duplicate = header_cols[2].button("複製", key=f"scenario_duplicate_{key}")
+        move_down = header_cols[3].button("▼", key=f"scenario_move_down_{key}", disabled=index == len(records) - 1)
+        delete = header_cols[4].button("削除", key=f"scenario_delete_{key}")
+
+        if move_up:
+            updated_df = _move_scenario_row(updated_df, index, -1)
+            st.session_state["scenario_df"] = _sanitize_scenario_df(updated_df)
+            st.experimental_rerun()
+        if move_down:
+            updated_df = _move_scenario_row(updated_df, index, 1)
+            st.session_state["scenario_df"] = _sanitize_scenario_df(updated_df)
+            st.experimental_rerun()
+        if duplicate:
+            updated_df = _duplicate_scenario_row(updated_df, index)
+            st.session_state["scenario_df"] = _sanitize_scenario_df(updated_df)
+            st.experimental_rerun()
+        if delete:
+            updated_df = updated_df.drop(updated_df.index[index]).reset_index(drop=True)
+            if updated_df.empty:
+                updated_df = _default_scenario_dataframe()
+            st.session_state["scenario_df"] = _sanitize_scenario_df(updated_df)
+            st.experimental_rerun()
+
+        note = str(record.get("notes", "")).strip() or "メモは未入力です。"
+        st.write(note)
+        st.markdown("---")
+    return updated_df
+
+
+def _default_multi_year_frame(
+    years: int,
+    *,
+    base_sales: Decimal,
+    cogs_ratio: float,
+    fixed_cost: Decimal,
+    base_capex: Decimal,
+) -> pd.DataFrame:
+    """Return a dataframe scaffold for multi-year planning."""
+
+    rows: List[Dict[str, object]] = []
+    for year in range(1, years + 1):
+        rows.append(
+            {
+                "年度": f"Year {year}",
+                "売上高": float(base_sales),
+                "原価率(%)": float(cogs_ratio * 100.0),
+                "固定費": float(fixed_cost),
+                "投資額": float(base_capex if year == 1 else Decimal("0")),
+            }
+        )
+    return pd.DataFrame(rows, columns=["年度", "売上高", "原価率(%)", "固定費", "投資額"])
 
 
 def _sanitize_scenario_df(df: pd.DataFrame | None) -> pd.DataFrame:
@@ -712,11 +886,52 @@ with scenario_tab:
         scenario_df = sanitized_editor_df
         st.session_state["scenario_df"] = scenario_df
 
+    scenario_records = scenario_df.to_dict("records")
+    level_options = list(DRIVER_PRESET_LEVELS.keys())
+    if scenario_records:
+        st.markdown("#### ドライバープリセット適用")
+        st.caption("主要ドライバーを5段階プリセットから選び、複数シナリオへ一括適用します。")
+        key_to_name = {record["key"]: record.get("name", record["key"]) for record in scenario_records}
+        selection = st.multiselect(
+            "適用対象",
+            options=[record["key"] for record in scenario_records],
+            format_func=lambda key: key_to_name.get(key, key),
+            key="scenario_preset_targets",
+        )
+        preset_cols = st.columns(len(DRIVER_LABELS))
+        level_choices: Dict[str, str] = {}
+        default_index = level_options.index("現状維持") if "現状維持" in level_options else 0
+        for idx, (driver_key, driver_label) in enumerate(DRIVER_LABELS.items()):
+            col = preset_cols[idx]
+            level_choices[driver_key] = col.selectbox(
+                driver_label,
+                options=level_options,
+                index=default_index,
+                key=f"driver_preset_{driver_key}",
+                help=DRIVER_PRESET_HINTS.get(driver_key),
+            )
+        apply_disabled = not selection
+        if st.button("プリセットを適用", type="primary", disabled=apply_disabled):
+            scenario_df = _apply_driver_presets(
+                scenario_df,
+                target_keys=list(selection),
+                driver_levels=level_choices,
+            )
+            scenario_df = _sanitize_scenario_df(scenario_df)
+            st.session_state["scenario_df"] = scenario_df
+            st.success("プリセットを適用しました。")
+    else:
+        st.info("プリセット適用は、シナリオを追加すると利用できます。")
+
+    scenario_df = _sanitize_scenario_df(scenario_df)
+    st.session_state["scenario_df"] = scenario_df
+    scenario_df = _render_scenario_cards(scenario_df)
+    scenario_records = scenario_df.to_dict("records")
+
     thresholds = st.session_state["scenario_thresholds"]
     var_limit_threshold = thresholds.get("var_limit")
     dscr_floor_threshold = thresholds.get("dscr_floor")
 
-    scenario_records = scenario_df.to_dict("records")
     scenario_results: Dict[str, Dict[str, Decimal]] = {}
     for record in scenario_records:
         scenario_results[record["key"]] = evaluate_scenario(
@@ -782,25 +997,180 @@ with scenario_tab:
         st.warning("リスク閾値を下回るシナリオ: " + ", ".join(flagged_labels))
 
     if chart_rows:
-        chart_source = pd.melt(
-            pd.DataFrame(chart_rows),
-            id_vars="シナリオ",
-            value_vars=["売上高", "粗利", "EBIT", "FCF"],
-            var_name="指標",
-            value_name="金額",
+        st.markdown("#### Plotlyチャートでシナリオ比較")
+        st.caption("バーをクリックすると選択中のシナリオがハイライトされ、詳細メトリクスが更新されます。")
+        metric_choice = st.selectbox(
+            "表示する指標",
+            list(METRIC_LABELS.keys()),
+            index=list(METRIC_LABELS.keys()).index("fcf"),
+            format_func=lambda key: METRIC_LABELS[key],
+            key="scenario_metric_choice",
         )
-        chart = (
-            alt.Chart(chart_source)
-            .mark_bar()
-            .encode(
-                x=alt.X("シナリオ:N", sort=None),
-                y=alt.Y("金額:Q", axis=alt.Axis(format="~s")),
-                color="シナリオ:N",
-                column="指標:N",
+        x_labels = [record.get("name", record.get("key", "")) for record in scenario_records]
+        y_values = [
+            float(_metric_value(scenario_results[record["key"]], metric_choice))
+            for record in scenario_records
+        ]
+        selected_label = st.session_state.get("scenario_selected_label")
+        colors = [
+            SCENARIO_HIGHLIGHT_COLOR if label == selected_label else SCENARIO_BAR_COLOR
+            for label in x_labels
+        ]
+        bar_trace = go.Bar(
+            x=x_labels,
+            y=y_values,
+            marker=dict(color=colors),
+            customdata=[[record["key"]] for record in scenario_records],
+            hovertemplate="シナリオ=%{x}<br>値=%{y:,.0f}<extra></extra>",
+        )
+        fig = go.Figure(data=[bar_trace])
+        mean_value = float(np.mean(y_values)) if y_values else 0.0
+        median_value = float(np.median(y_values)) if y_values else 0.0
+        p10 = float(np.percentile(y_values, 10)) if len(y_values) > 1 else mean_value
+        p90 = float(np.percentile(y_values, 90)) if len(y_values) > 1 else mean_value
+        fig.add_hline(mean_value, line=dict(color="#1F77B4", dash="dash"), annotation_text="平均")
+        fig.add_hline(median_value, line=dict(color="#FF7F0E", dash="dot"), annotation_text="中央値")
+        if len(y_values) > 1:
+            fig.add_hrect(
+                y0=min(p10, p90),
+                y1=max(p10, p90),
+                fillcolor="rgba(70, 130, 180, 0.1)",
+                layer="below",
+                line_width=0,
+                annotation_text="10-90%帯",
+                annotation_position="top left",
             )
-            .properties(height=260)
+        fig.update_layout(
+            yaxis_title=METRIC_LABELS[metric_choice],
+            xaxis_title="シナリオ",
+            hovermode="closest",
+            clickmode="event+select",
+            dragmode="select",
+            bargap=0.25,
+            margin=dict(l=40, r=20, t=60, b=40),
         )
-        st.altair_chart(chart, use_container_width=True)
+        plot_state = st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key="scenario_metric_plot",
+            on_select="rerun",
+            config=plotly_download_config("scenario_metric"),
+        )
+        if plot_state and getattr(plot_state, "selection", None):
+            points = plot_state.selection.get("points", [])
+            if points:
+                point = points[0]
+                label = x_labels[point.get("pointIndex", 0)]
+                st.session_state["scenario_selected_label"] = label
+            else:
+                st.session_state.pop("scenario_selected_label", None)
+        selected_label = st.session_state.get("scenario_selected_label")
+        if selected_label:
+            st.info(f"選択中のシナリオ: **{selected_label}**")
+
+
+    st.markdown("#### 多年度計画と累積キャッシュフロー")
+    st.caption("1年〜5年の計画を入力し、フリーキャッシュフローの累積推移を即座に把握します。")
+    base_amounts = compute(plan_cfg)
+    base_sales_amount = Decimal(base_amounts.get("REV", Decimal("0")))
+    cogs_total = Decimal(base_amounts.get("COGS_TTL", Decimal("0")))
+    fixed_total = Decimal(base_amounts.get("OPEX_TTL", Decimal("0")))
+    cogs_ratio = float(cogs_total / base_sales_amount) if base_sales_amount else 0.5
+    capex_year1 = bundle.capex.total_investment()
+    multi_year_state: Dict[str, object] = st.session_state.setdefault(
+        "multi_year_plan",
+        {
+            "years": 3,
+            "data": _default_multi_year_frame(
+                3,
+                base_sales=base_sales_amount,
+                cogs_ratio=cogs_ratio,
+                fixed_cost=fixed_total,
+                base_capex=capex_year1,
+            ),
+        },
+    )
+    years_options = [1, 2, 3, 4, 5]
+    current_years = int(multi_year_state.get("years", 3))
+    default_index = years_options.index(current_years) if current_years in years_options else 2
+    selected_years = st.selectbox("計画年数", years_options, index=default_index, key="multi_year_period")
+    existing_df = multi_year_state.get("data")
+    if not isinstance(existing_df, pd.DataFrame) or len(existing_df) != selected_years:
+        existing_df = _default_multi_year_frame(
+            selected_years,
+            base_sales=base_sales_amount,
+            cogs_ratio=cogs_ratio,
+            fixed_cost=fixed_total,
+            base_capex=capex_year1,
+        )
+    st.session_state["multi_year_plan"]["years"] = selected_years
+    st.session_state["multi_year_plan"]["data"] = existing_df
+
+    plan_editor = st.data_editor(
+        existing_df,
+        num_rows="fixed",
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "年度": st.column_config.TextColumn("年度", disabled=True),
+            "売上高": st.column_config.NumberColumn("売上高", format="%.0f"),
+            "原価率(%)": st.column_config.NumberColumn("原価率(%)", min_value=0.0, max_value=100.0, format="%.1f"),
+            "固定費": st.column_config.NumberColumn("固定費", format="%.0f"),
+            "投資額": st.column_config.NumberColumn("投資額", format="%.0f"),
+        },
+    )
+
+    if isinstance(plan_editor, pd.DataFrame):
+        clean_df = plan_editor.copy()
+        numeric_cols = ["売上高", "原価率(%)", "固定費", "投資額"]
+        for col in numeric_cols:
+            clean_df[col] = pd.to_numeric(clean_df[col], errors="coerce").fillna(0.0)
+        clean_df["粗利益"] = clean_df["売上高"] * (1 - clean_df["原価率(%)"] / 100.0)
+        clean_df["営業CF"] = clean_df["粗利益"] - clean_df["固定費"]
+        clean_df["フリーCF"] = clean_df["営業CF"] - clean_df["投資額"]
+        clean_df["累積CF"] = clean_df["フリーCF"].cumsum()
+        base_columns = ["年度", *numeric_cols]
+        st.session_state["multi_year_plan"] = {"years": selected_years, "data": clean_df.loc[:, base_columns]}
+        display_df = clean_df[["年度", "売上高", "粗利益", "営業CF", "投資額", "フリーCF", "累積CF"]]
+        st.dataframe(
+            display_df,
+            hide_index=True,
+            **use_container_width_kwargs(st.dataframe),
+        )
+        plan_fig = go.Figure()
+        plan_fig.add_trace(
+            go.Scatter(
+                x=display_df["年度"],
+                y=display_df["フリーCF"],
+                mode="lines+markers",
+                name="フリーCF",
+                line=dict(color="#2E86AB", width=3),
+            )
+        )
+        plan_fig.add_trace(
+            go.Scatter(
+                x=display_df["年度"],
+                y=display_df["累積CF"],
+                mode="lines+markers",
+                name="累積CF",
+                line=dict(color="#B23A48", width=3),
+                fill="tozeroy",
+                fillcolor="rgba(178, 58, 72, 0.15)",
+            )
+        )
+        plan_fig.update_layout(
+            yaxis_title=f"金額 ({unit})",
+            hovermode="x unified",
+            legend=dict(orientation="h", y=1.1),
+        )
+        st.plotly_chart(
+            plan_fig,
+            use_container_width=True,
+            key="multi_year_cf_chart",
+            config=plotly_download_config("multi_year_cashflow"),
+        )
+    else:
+        st.info("多年度計画を入力すると、年次CFの推移がここに表示されます。")
 
 
 with sensitivity_tab:
@@ -1154,9 +1524,16 @@ with sensitivity_tab:
             }
         st.session_state["scenario_mc_config"] = config_updates
 
-        mc_trials = st.slider("試行回数", min_value=100, max_value=1000, value=400, step=50)
-        if mc_trials > 700:
-            st.warning("試行回数が多いため、再計算に時間がかかる可能性があります。")
+        mc_trials = st.number_input(
+            "試行回数",
+            min_value=1000,
+            max_value=100000,
+            value=5000,
+            step=1000,
+            help="最大10万回まで計算可能です。試行回数を増やすと結果の滑らかさが向上します。",
+        )
+        if mc_trials > 50000:
+            st.warning("非常に多い試行回数のため、完了まで時間がかかる場合があります。")
         mc_seed = st.number_input("乱数シード", min_value=0, max_value=9999, value=42, step=1)
         metric_for_mc = st.selectbox(
             "注目指標",
@@ -1253,7 +1630,7 @@ with sensitivity_tab:
         else:
             dscr_shortfall = float("nan")
 
-        metrics_cols = st.columns(3)
+        metrics_cols = st.columns(4)
         if math.isnan(var_value):
             var_display = "—"
         else:
@@ -1268,6 +1645,20 @@ with sensitivity_tab:
         else:
             dscr_display = "—"
         metrics_cols[2].metric("DSCR下限割れ確率", dscr_display)
+
+        expected_value = float(mc_df_session["Metric"].mean())
+        if metric_for_mc == "dscr":
+            if math.isnan(expected_value):
+                expected_display = "—"
+            else:
+                expected_display = f"{expected_value:.2f}倍"
+        else:
+            expected_display = (
+                format_amount_with_unit(Decimal(str(expected_value)), unit)
+                if not math.isnan(expected_value)
+                else "—"
+            )
+        metrics_cols[3].metric("期待値", expected_display)
 
         if (
             var_limit_threshold is not None
