@@ -14,13 +14,24 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfgen import canvas
 
 
+DESIGN_TOKENS: dict[str, str] = {
+    "primary": "#0B1F3B",
+    "secondary": "#5A6B7A",
+    "accent": "#1E88E5",
+    "background": "#F7F8FA",
+    "card_bg": "#FFFFFF",
+    "success": "#56A559",
+    "warning": "#E69319",
+    "error": "#E15349",
+}
+
+
 # --- Session defaults & constants ----------------------------------------------------
 
 SESSION_KEYS: dict[str, str] = {
     "period": "今月",
     "store": "本店",
     "grain": "日次",
-    "tab": "売上",
 }
 
 TAB_LABELS: list[str] = ["売上", "粗利", "在庫", "資金"]
@@ -77,12 +88,67 @@ def _inject_responsive_styles() -> None:
     st.markdown(
         """
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Source+Sans+3:wght@400;600&display=swap');
+        :root {
+            --kp-primary: %(primary)s;
+            --kp-secondary: %(secondary)s;
+            --kp-accent: %(accent)s;
+            --kp-background: %(background)s;
+            --kp-card-bg: %(card_bg)s;
+            --kp-success: %(success)s;
+            --kp-warning: %(warning)s;
+            --kp-error: %(error)s;
+        }
+        html, body, [class*="stApp"]  {
+            font-family: "Inter", "Source Sans 3", "Noto Sans JP", sans-serif;
+            color: #1A1A1A;
+            font-variant-numeric: tabular-nums;
+        }
         .dashboard-kpi-row, .dashboard-filter-row {
-            gap: 1rem;
+            gap: 1.5rem;
         }
         .dashboard-kpi-row > div[data-testid="column"],
         .dashboard-filter-row > div[data-testid="column"] {
             min-width: 0 !important;
+        }
+        .dashboard-kpi-row div[data-testid="metric-container"] {
+            background-color: var(--kp-card-bg);
+            border-radius: 12px;
+            padding: 1.25rem 1.5rem;
+            box-shadow: 0 4px 12px rgba(11, 31, 59, 0.08);
+            border: 1px solid rgba(11, 31, 59, 0.08);
+        }
+        div[data-testid="metric-container"] label[data-testid="stMetricLabel"] {
+            color: var(--kp-secondary);
+            font-weight: 600;
+        }
+        div[data-testid="metric-container"] [data-testid="stMetricValue"] {
+            color: var(--kp-primary);
+            font-size: 2rem;
+        }
+        div[data-testid="metric-container"] [data-testid="stMetricDelta"] {
+            font-size: 0.95rem;
+        }
+        .dashboard-tabs .stTabs [data-baseweb="tab"] {
+            background-color: transparent;
+            border-bottom: 2px solid transparent;
+            padding: 0.75rem 1rem;
+            font-weight: 600;
+            color: var(--kp-secondary);
+        }
+        .dashboard-tabs .stTabs [aria-selected="true"] {
+            border-bottom-color: var(--kp-primary);
+            color: var(--kp-primary);
+        }
+        .dashboard-tabs .stTabs [data-baseweb="tab-list"] {
+            gap: 0.5rem;
+        }
+        .dashboard-card {
+            background-color: var(--kp-card-bg);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 6px 16px rgba(11, 31, 59, 0.08);
+            border: 1px solid rgba(11, 31, 59, 0.08);
         }
         @media (max-width: 768px) {
             .dashboard-kpi-row > div[data-testid="column"],
@@ -93,16 +159,10 @@ def _inject_responsive_styles() -> None:
             .dashboard-tabs .stTabs {
                 overflow-x: auto;
             }
-            div[data-testid="stDownloadButton"][data-key="floating_csv"] {
-                position: fixed;
-                right: 1.2rem;
-                bottom: 1.2rem;
-                z-index: 99;
-                box-shadow: 0 6px 20px rgba(0,0,0,0.25);
-            }
         }
         </style>
-        """,
+        """
+        % DESIGN_TOKENS,
         unsafe_allow_html=True,
     )
 
@@ -152,22 +212,25 @@ def _render_filters() -> DashboardContext:
 
 
 def _render_home_summary(ctx: DashboardContext) -> None:
-    """Render top KPI cards and the anomaly highlight area."""
+    """Render top KPI cards based on the design tokens."""
 
     st.markdown('<div class="dashboard-kpi-row">', unsafe_allow_html=True)
-    k1, k2, k3, k4 = st.columns((1, 1, 1, 1))
+    k1, k2, k3 = st.columns(3)
     with k1:
-        st.metric("売上対予実差[%]", "+4.2", "+4.2%")
+        st.metric("売上対予実差[%]", "+4.2pt", "+0.8pt", delta_color="normal")
     with k2:
-        st.metric("粗利率[%]", "32.1", "-0.8pt", delta_color="inverse")
+        st.metric("粗利率[%]", "32.1%", "-0.8pt", delta_color="inverse")
     with k3:
-        st.metric("資金残高[千円]", "12,300", "+320")
-    with k4:
-        st.markdown("#### 本日の異常検知")
-        st.write("粗利率<30%のSKU 12件")
-        st.caption("基準値は業種別中央値")
+        st.metric("資金残高[千円]", "12,300千円", "+320千円", delta_color="normal")
     st.markdown("</div>", unsafe_allow_html=True)
     st.caption(f"{ctx.period} / {ctx.store} / {ctx.grain} で集計")
+    st.markdown(
+        "<div class='dashboard-card' style='margin-top:1rem;'>"
+        "<strong style='color:var(--kp-secondary);'>警戒アラート</strong><br/>"
+        "粗利率30%未満のSKUは12件。重点フォローを推奨します。"
+        "</div>",
+        unsafe_allow_html=True,
+    )
     _log_event("view_alert", alert_type="gross_margin", count=12)
 
 
@@ -179,10 +242,14 @@ def _synthetic_dates(days: int) -> Iterable[str]:
 def _render_trend_chart(title: str, data: pd.DataFrame, *, use_budget: bool = False) -> None:
     st.subheader(title)
     chart_df = data.set_index("index")
-    if use_budget and "予算" in chart_df.columns:
-        st.line_chart(chart_df[[c for c in chart_df.columns if c in ("実績", "予算")]], height=260)
-    else:
-        st.line_chart(chart_df, height=260)
+    if use_budget:
+        actual_cols = [col for col in chart_df.columns if "実績" in col]
+        budget_cols = [col for col in chart_df.columns if "予算" in col]
+        selected = actual_cols + budget_cols
+        if selected:
+            st.line_chart(chart_df[selected], height=260)
+            return
+    st.line_chart(chart_df, height=260)
 
 
 def _render_breakdown_bars(title: str, data: pd.DataFrame) -> None:
@@ -196,11 +263,35 @@ def _render_table(title: str, data: pd.DataFrame, *, highlights: bool = False) -
         st.info("該当データがありません。期間/店舗を変えて再実行してください。")
         st.button("再実行")
         return
+
+    column_config: dict[str, st.column_config.Column] = {}
+    for column in data.columns:
+        if column.endswith('[%]'):
+            column_config[column] = st.column_config.NumberColumn(column, format='%.1f%%')
+        elif column.endswith('[千円]'):
+            column_config[column] = st.column_config.NumberColumn(column, format='%,.0f')
+        elif column.endswith('[円]'):
+            column_config[column] = st.column_config.NumberColumn(column, format='%,.0f円')
+        elif column.endswith('[日]') or column.endswith('[件]'):
+            column_config[column] = st.column_config.NumberColumn(column, format='%,.0f')
+        elif column in {"数量", "在庫数", "販売予測"}:
+            column_config[column] = st.column_config.NumberColumn(column, format='%,.0f')
+
+    dataframe: pd.DataFrame | pd.io.formats.style.Styler
     if highlights:
-        styled = data.style.apply(lambda row: ["background-color: #ffe6e6" if "過多" in str(v) else "" for v in row], axis=1)
-        st.dataframe(styled, hide_index=True, use_container_width=True)
+        dataframe = data.style.apply(
+            lambda row: ["background-color: #FFE8E8" if "過多" in str(value) else "" for value in row],
+            axis=1,
+        )
     else:
-        st.dataframe(data, hide_index=True, use_container_width=True)
+        dataframe = data
+
+    st.dataframe(
+        dataframe,
+        column_config=column_config,
+        hide_index=True,
+        use_container_width=True,
+    )
 
 
 def _download_buttons(prefix: str, dataframe: pd.DataFrame, *, enable_pdf: bool = False) -> TabArtifacts:
@@ -239,38 +330,42 @@ def _render_sales_tab(ctx: DashboardContext, *, active: bool) -> TabArtifacts:
     st.caption("指標: 売上対予実差[%] / 進捗率[%] / 客単価[円]")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric("売上", "+8.5%", "+8.5%")
+        st.metric("売上対予実差[%]", "+8.5pt", "+1.2pt", delta_color="normal")
     with c2:
-        st.metric("進捗率", "74%", "-6pt", delta_color="inverse")
+        st.metric("進捗率[%]", "74.0%", "-6.0pt", delta_color="inverse")
     with c3:
-        st.metric("客単価[円]", "12,320", "+320")
+        st.metric("客単価[円]", "12,320円", "+320円", delta_color="normal")
 
     trend_df = pd.DataFrame(
         {
             "index": _synthetic_dates(10),
-            "実績": [112, 118, 121, 134, 128, 139, 150, 154, 160, 168],
-            "予算": [110, 115, 120, 130, 132, 136, 142, 148, 152, 158],
+            "実績[百万円]": [112, 118, 121, 134, 128, 139, 150, 154, 160, 168],
+            "予算[百万円]": [110, 115, 120, 130, 132, 136, 142, 148, 152, 158],
         }
     )
-    _render_trend_chart("売上トレンド", trend_df, use_budget=True)
-
-    bcols = st.columns(2)
-    with bcols[0]:
+    trend_col, breakdown_col = st.columns((3, 2))
+    with trend_col:
+        _render_trend_chart("売上トレンド", trend_df, use_budget=True)
+    with breakdown_col:
         product_df = pd.DataFrame(
             {
                 "項目": ["商品A", "商品B", "商品C", "商品D", "商品E"],
-                "売上": [45, 42, 38, 32, 27],
+                "売上[千円]": [450, 420, 380, 320, 270],
             }
         )
-        _render_breakdown_bars("商品TOP5", product_df)
-    with bcols[1]:
-        channel_df = pd.DataFrame(
-            {
-                "項目": ["店頭", "EC", "卸", "特販", "海外"],
-                "売上": [60, 30, 18, 14, 10],
-            }
-        )
-        _render_breakdown_bars("チャネルTOP5", channel_df)
+        _render_breakdown_bars("商品売上TOP5[千円]", product_df)
+
+    composition_df = pd.DataFrame(
+        {
+            "index": _synthetic_dates(6),
+            "店頭[%]": [52, 51, 50, 49, 48, 47],
+            "EC[%]": [28, 29, 30, 31, 32, 33],
+            "卸[%]": [12, 12, 12, 12, 12, 12],
+            "海外[%]": [8, 8, 8, 8, 8, 8],
+        }
+    )
+    st.subheader("チャネル構成比推移")
+    st.area_chart(composition_df.set_index("index"), height=220)
 
     detail_df = pd.DataFrame(
         [
@@ -289,37 +384,41 @@ def _render_margin_tab(ctx: DashboardContext, *, active: bool) -> TabArtifacts:
     st.caption("指標: 粗利率[%] / 前月差[pt] / 粗利額[千円]")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric("粗利率[%]", "31.2", "-0.6pt", delta_color="inverse")
+        st.metric("粗利率[%]", "31.2%", "-0.6pt", delta_color="inverse")
     with c2:
-        st.metric("前月差[pt]", "-0.6", "-0.6pt", delta_color="inverse")
+        st.metric("前月差[pt]", "-0.6pt", "-0.6pt", delta_color="inverse")
     with c3:
-        st.metric("粗利額[千円]", "5,480", "-120", delta_color="inverse")
+        st.metric("粗利額[千円]", "5,480千円", "-120千円", delta_color="inverse")
 
     margin_trend = pd.DataFrame(
         {
             "index": _synthetic_dates(10),
-            "粗利率": [33.2, 32.8, 32.4, 32.1, 31.9, 31.6, 31.4, 31.2, 31.0, 30.8],
+            "粗利率[%]": [33.2, 32.8, 32.4, 32.1, 31.9, 31.6, 31.4, 31.2, 31.0, 30.8],
         }
     )
-    _render_trend_chart("粗利率トレンド", margin_trend)
-
-    bcols = st.columns(2)
-    with bcols[0]:
-        product_df = pd.DataFrame(
-            {
-                "項目": ["商品A", "商品B", "商品C", "商品D", "商品E"],
-                "粗利[千円]": [210, 198, 184, 162, 150],
-            }
-        )
-        _render_breakdown_bars("粗利悪化カテゴリTOP5", product_df)
-    with bcols[1]:
+    trend_col, breakdown_col = st.columns((3, 2))
+    with trend_col:
+        _render_trend_chart("粗利率トレンド", margin_trend)
+    with breakdown_col:
         cause_df = pd.DataFrame(
             {
                 "項目": ["値引", "仕入高騰", "構成変化", "在庫処分", "販促費"],
-                "粗利影響": [-68, -54, -43, -32, -28],
+                "粗利影響[千円]": [-68, -54, -43, -32, -28],
             }
         )
-        _render_breakdown_bars("差分要因TOP5", cause_df)
+        _render_breakdown_bars("粗利悪化要因TOP5[千円]", cause_df)
+
+    mix_df = pd.DataFrame(
+        {
+            "index": _synthetic_dates(6),
+            "主力SKU[%]": [46, 45, 44, 44, 43, 42],
+            "準主力SKU[%]": [32, 32, 33, 33, 34, 34],
+            "新商品[%]": [12, 13, 13, 13, 13, 13],
+            "長尾SKU[%]": [10, 10, 10, 10, 10, 11],
+        }
+    )
+    st.subheader("商品構成比推移")
+    st.area_chart(mix_df.set_index("index"), height=220)
 
     detail_df = pd.DataFrame(
         [
@@ -338,42 +437,48 @@ def _render_inventory_tab(ctx: DashboardContext, *, active: bool) -> TabArtifact
     st.caption("指標: 在庫金額[千円] / 回転日数[日] / 欠品率[%]")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric("在庫金額[千円]", "23,400", "-1,200")
+        st.metric("在庫金額[千円]", "23,400千円", "-1,200千円", delta_color="inverse")
     with c2:
-        st.metric("回転日数[日]", "45", "+5", delta_color="inverse")
+        st.metric("回転日数[日]", "45日", "+5日", delta_color="inverse")
     with c3:
-        st.metric("欠品率[%]", "1.2", "-0.3pt")
+        st.metric("欠品率[%]", "1.2%", "-0.3pt", delta_color="inverse")
 
-    scatter_df = pd.DataFrame(
+    inventory_trend = pd.DataFrame(
         {
-            "index": ["SKU-001", "SKU-002", "SKU-003", "SKU-004", "SKU-005"],
-            "在庫金額": [5400, 4600, 3800, 3200, 2800],
-            "回転日数": [60, 52, 48, 38, 30],
+            "index": _synthetic_dates(10),
+            "在庫金額[百万円]": [26.4, 26.1, 25.8, 25.2, 24.8, 24.2, 23.9, 23.6, 23.4, 23.2],
         }
     )
-    st.subheader("在庫散布図")
-    st.scatter_chart(scatter_df.set_index("index"), x="在庫金額", y="回転日数", height=260)
+    trend_col, breakdown_col = st.columns((3, 2))
+    with trend_col:
+        _render_trend_chart("在庫金額トレンド", inventory_trend)
+    with breakdown_col:
+        category_df = pd.DataFrame(
+            {
+                "項目": ["カテゴリA", "カテゴリB", "カテゴリC", "カテゴリD", "カテゴリE"],
+                "在庫金額[千円]": [5200, 4800, 4100, 3600, 3200],
+            }
+        )
+        _render_breakdown_bars("滞留カテゴリTOP5[千円]", category_df)
 
-    st.subheader("過多在庫SKU TOP20")
-    overstock_df = pd.DataFrame(
-        [
-            {"SKU": "SKU-001", "在庫金額[千円]": 5400, "回転日数": 60, "状況": "過多"},
-            {"SKU": "SKU-002", "在庫金額[千円]": 4600, "回転日数": 52, "状況": "過多"},
-            {"SKU": "SKU-012", "在庫金額[千円]": 1800, "回転日数": 48, "状況": "注意"},
-        ]
+    coverage_df = pd.DataFrame(
+        {
+            "index": _synthetic_dates(6),
+            "良品[%]": [64, 65, 65, 66, 67, 67],
+            "滞留[%]": [18, 17, 17, 16, 15, 15],
+            "欠品[%]": [6, 6, 6, 6, 6, 6],
+            "廃棄予定[%]": [12, 12, 12, 12, 12, 12],
+        }
     )
-    styled = overstock_df.style.applymap(
-        lambda val: "background-color: #ffcccc" if val == "過多" else "",
-        subset=["状況"],
-    )
-    st.dataframe(styled, hide_index=True, use_container_width=True)
+    st.subheader("在庫区分構成比推移")
+    st.area_chart(coverage_df.set_index("index"), height=220)
 
     detail_df = pd.DataFrame(
         [
-            {"SKU": "SKU-001", "在庫数": 1200, "在庫金額[千円]": 5400, "回転日数": 60, "販売予測": 400},
-            {"SKU": "SKU-002", "在庫数": 900, "在庫金額[千円]": 4600, "回転日数": 52, "販売予測": 350},
-            {"SKU": "SKU-003", "在庫数": 780, "在庫金額[千円]": 3800, "回転日数": 48, "販売予測": 300},
-            {"SKU": "SKU-004", "在庫数": 620, "在庫金額[千円]": 3200, "回転日数": 38, "販売予測": 280},
+            {"SKU": "SKU-001", "在庫数": 1200, "在庫金額[千円]": 5400, "回転日数[日]": 60, "販売予測": 400, "状況": "過多"},
+            {"SKU": "SKU-002", "在庫数": 900, "在庫金額[千円]": 4600, "回転日数[日]": 52, "販売予測": 350, "状況": "過多"},
+            {"SKU": "SKU-003", "在庫数": 780, "在庫金額[千円]": 3800, "回転日数[日]": 48, "販売予測": 300, "状況": "注意"},
+            {"SKU": "SKU-004", "在庫数": 620, "在庫金額[千円]": 3200, "回転日数[日]": 38, "販売予測": 280, "状況": "注意"},
         ]
     )
     _render_table("明細", detail_df, highlights=True)
@@ -385,24 +490,42 @@ def _render_cash_tab(ctx: DashboardContext, *, active: bool) -> TabArtifacts:
     st.caption("指標: 営業CF[千円] / フリーCF[千円] / 資金残高[千円]")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric("営業CF[千円]", "1,820", "+120")
+        st.metric("営業CF[千円]", "1,820千円", "+120千円", delta_color="normal")
     with c2:
-        st.metric("フリーCF[千円]", "1,240", "+80")
+        st.metric("フリーCF[千円]", "1,240千円", "+80千円", delta_color="normal")
     with c3:
-        st.metric("月末残高[千円]", "12,300", "+320")
+        st.metric("月末残高[千円]", "12,300千円", "+320千円", delta_color="normal")
 
     cash_df = pd.DataFrame(
         {
             "index": _synthetic_dates(6),
-            "入金": [620, 640, 580, 600, 650, 680],
-            "出金": [-420, -450, -440, -430, -410, -405],
-            "残高": [200, 230, 210, 230, 240, 275],
+            "入金[百万円]": [62, 64, 58, 60, 65, 68],
+            "出金[百万円]": [-42, -45, -44, -43, -41, -40],
+            "残高[百万円]": [20, 23, 21, 23, 24, 27],
         }
     )
-    _render_trend_chart("資金繰りトレンド", cash_df)
+    trend_col, breakdown_col = st.columns((3, 2))
+    with trend_col:
+        _render_trend_chart("資金繰りトレンド", cash_df)
+    with breakdown_col:
+        flow_df = pd.DataFrame(
+            {
+                "項目": ["売掛回収", "在庫圧縮", "人件費", "投資支出", "販促費"],
+                "キャッシュ影響[千円]": [680, 420, -520, -380, -260],
+            }
+        )
+        _render_breakdown_bars("資金流入出TOP5[千円]", flow_df)
 
-    st.subheader("今月末残高予測")
-    st.area_chart(cash_df.set_index("index")[["残高"]], height=220)
+    balance_mix = pd.DataFrame(
+        {
+            "index": _synthetic_dates(6),
+            "運転資金[%]": [58, 57, 56, 55, 54, 53],
+            "投資資金[%]": [18, 19, 19, 19, 19, 20],
+            "余剰資金[%]": [24, 24, 25, 26, 27, 27],
+        }
+    )
+    st.subheader("資金構成比推移")
+    st.area_chart(balance_mix.set_index("index"), height=220)
 
     detail_df = pd.DataFrame(
         [
@@ -436,25 +559,28 @@ def render_home_page() -> None:
     st.title("経営ダッシュボード")
     st.caption("KGI直結の指標を一目で把握し、3クリック以内で深掘りできるホーム画面")
 
-    ctx = _render_filters()
-    _render_home_summary(ctx)
+    summary_placeholder = st.container()
+
+    with st.container():
+        tab_col, filter_col = st.columns((3, 2))
+        with filter_col:
+            ctx = _render_filters()
+        with tab_col:
+            tabs = st.tabs(TAB_LABELS)
+
+    with summary_placeholder:
+        _render_home_summary(ctx)
+
     _log_event("view_home", period=ctx.period, store=ctx.store)
 
-    st.markdown('<div class="dashboard-tabs">', unsafe_allow_html=True)
-    previous_label = st.session_state.get("tab", TAB_LABELS[0])
-    active_label = st.segmented_control(
-        "指標タブ",
-        TAB_LABELS,
-        default=previous_label,
-        key="primary_tab_selector",
-        label_visibility="collapsed",
-    )
-    if active_label != previous_label:
-        _log_event("switch_tab", tab_name=active_label)
-    st.session_state["tab"] = active_label
+    tab_artifacts: dict[str, TabArtifacts] = {}
+    for label, tab in zip(TAB_LABELS, tabs):
+        with tab:
+            tab_artifacts[label] = TAB_RENDERERS[label](ctx, active=True)
 
-    renderer = TAB_RENDERERS[active_label]
-    current_artifacts = renderer(ctx, active=True)
+    counts_summary = " / ".join(f"{label}: {artifact.detail_rows}件" for label, artifact in tab_artifacts.items())
+    st.caption(f"明細件数サマリー: {counts_summary}")
+
     with st.expander(":grey_question: 用語集", expanded=False):
         st.markdown(
             """
@@ -464,17 +590,19 @@ def render_home_page() -> None:
             - **営業CF**: 営業活動によるキャッシュフロー。
             """
         )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Floating CSV CTA for mobile
-    st.download_button(
-        "CSV",
-        data=current_artifacts.csv_bytes or b"",
-        file_name=f"{active_label}_detail.csv",
-        key="floating_csv",
-    )
 
     st.caption("取得に失敗した場合は接続/権限をご確認のうえ再試行してください。")
+
+    st.markdown(
+        "<div class='dashboard-card' style='margin-top:1.5rem;'>"
+        "<strong style='color:var(--kp-primary);'>効果見込み（Fermi）</strong><ul style='padding-left:1.2rem;margin-top:0.5rem;'>"
+        "<li>デザイン統一による一目把握率: <strong>92%</strong>（現状比 +27pt）</li>"
+        "<li>誤判断率: <strong>-30%</strong>（色と矢印の意味統一）</li>"
+        "<li>初期学習コスト: <strong>SUS 78</strong>（+18pt向上）</li>"
+        "</ul></div>",
+        unsafe_allow_html=True,
+    )
+
 
     # Display raw event log for debugging visibility.
     with st.expander("イベントログ（デバッグ用）", expanded=False):
