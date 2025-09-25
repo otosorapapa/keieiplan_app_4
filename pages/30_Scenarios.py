@@ -699,8 +699,8 @@ def run_monte_carlo(
     n_trials: int,
     seed: int,
 ) -> pd.DataFrame:
-    if n_trials <= 0 or n_trials > 1000:
-        raise ValueError("Monte Carlo trials must be between 1 and 1000.")
+    if n_trials <= 0 or n_trials > 100000:
+        raise ValueError("Monte Carlo trials must be between 1 and 100000.")
 
     plan_cfg = deserialize_plan_config(plan_data)
     capex = CapexPlan(**capex_data)
@@ -1589,6 +1589,12 @@ with sensitivity_tab:
         )
         st.table(summary.to_frame(name="値"))
 
+        stats_series = summary.to_dict()
+        mean_value = float(stats_series.get("mean", float("nan")))
+        median_value = float(stats_series.get("Median", float("nan")))
+        p5_value = float(stats_series.get("P5", float("nan")))
+        p95_value = float(stats_series.get("P95", float("nan")))
+
         histogram = (
             alt.Chart(mc_df_session)
             .mark_area(opacity=0.6)
@@ -1598,6 +1604,28 @@ with sensitivity_tab:
             )
             .properties(height=260)
         )
+        overlays: List[alt.Chart] = []
+        if not math.isnan(p5_value) and not math.isnan(p95_value) and p95_value > p5_value:
+            band_df = pd.DataFrame([{"start": p5_value, "end": p95_value}])
+            overlays.append(
+                alt.Chart(band_df)
+                .mark_rect(opacity=0.15, color="#1f77b4")
+                .encode(x="start:Q", x2="end:Q")
+            )
+        if not math.isnan(mean_value):
+            overlays.append(
+                alt.Chart(pd.DataFrame({"value": [mean_value]}))
+                .mark_rule(color="#2E86AB", strokeDash=[6, 4])
+                .encode(x="value:Q")
+            )
+        if not math.isnan(median_value):
+            overlays.append(
+                alt.Chart(pd.DataFrame({"value": [median_value]}))
+                .mark_rule(color="#F58518", strokeDash=[2, 2])
+                .encode(x="value:Q")
+            )
+        if overlays:
+            histogram = alt.layer(histogram, *overlays).resolve_scale(y="shared")
         profit_curve = _profit_curve_frame(mc_df_session.get("Metric"))
         chart_cols = st.columns(2)
         chart_cols[0].altair_chart(histogram, use_container_width=True)
