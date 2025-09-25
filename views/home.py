@@ -441,30 +441,29 @@ def render_home_page() -> None:
     _log_event("view_home", period=ctx.period, store=ctx.store)
 
     st.markdown('<div class="dashboard-tabs">', unsafe_allow_html=True)
-    st.session_state.setdefault("primary_tabs", st.session_state["tab"])
-    tabs = st.tabs(TAB_LABELS, key="primary_tabs")
-    active_label = st.session_state.get("primary_tabs", TAB_LABELS[0])
-    if active_label != st.session_state.get("_active_tab"):
+    previous_label = st.session_state.get("tab", TAB_LABELS[0])
+    active_label = st.segmented_control(
+        "指標タブ",
+        TAB_LABELS,
+        selection=previous_label,
+        key="primary_tab_selector",
+        label_visibility="collapsed",
+    )
+    if active_label != previous_label:
         _log_event("switch_tab", tab_name=active_label)
-    st.session_state["_active_tab"] = active_label
     st.session_state["tab"] = active_label
 
-    current_artifacts = TabArtifacts(detail_rows=0, csv_bytes=b"")
-    for label, tab in zip(TAB_LABELS, tabs):
-        with tab:
-            renderer = TAB_RENDERERS[label]
-            artifacts = renderer(ctx, active=(label == active_label))
-            if label == active_label:
-                current_artifacts = artifacts
-            with st.expander(":grey_question: 用語集", expanded=False):
-                st.markdown(
-                    """
-                    - **売上対予実差**: (実績−予算)/予算。
-                    - **粗利率**: 粗利÷売上。対前月をデフォルト比較。
-                    - **在庫回転日数**: 在庫÷日次売上。値が大きいほど悪化。
-                    - **営業CF**: 営業活動によるキャッシュフロー。
-                    """
-                )
+    renderer = TAB_RENDERERS[active_label]
+    current_artifacts = renderer(ctx, active=True)
+    with st.expander(":grey_question: 用語集", expanded=False):
+        st.markdown(
+            """
+            - **売上対予実差**: (実績−予算)/予算。
+            - **粗利率**: 粗利÷売上。対前月をデフォルト比較。
+            - **在庫回転日数**: 在庫÷日次売上。値が大きいほど悪化。
+            - **営業CF**: 営業活動によるキャッシュフロー。
+            """
+        )
     st.markdown("</div>", unsafe_allow_html=True)
 
     # Floating CSV CTA for mobile
