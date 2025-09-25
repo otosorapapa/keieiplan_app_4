@@ -35,6 +35,7 @@ from calc import compute, generate_cash_flow, plan_from_models, summarize_plan_m
 from formatting import format_amount_with_unit, format_ratio
 from state import ensure_session_defaults, load_finance_bundle
 from theme import THEME_COLORS, inject_theme
+from ui.navigation import render_global_navigation, render_workflow_banner
 
 st.set_page_config(
     page_title="経営計画スタジオ｜レポート",
@@ -44,6 +45,9 @@ st.set_page_config(
 
 inject_theme()
 ensure_session_defaults()
+
+render_global_navigation("report")
+render_workflow_banner("report")
 
 settings_state: Dict[str, object] = st.session_state.get("finance_settings", {})
 unit = str(settings_state.get("unit", "百万円"))

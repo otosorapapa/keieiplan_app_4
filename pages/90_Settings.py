@@ -15,6 +15,7 @@ from models import (
 )
 from state import ensure_session_defaults
 from theme import inject_theme
+from ui.navigation import render_global_navigation, render_workflow_banner
 from services import auth
 from ui.streamlit_compat import use_container_width_kwargs
 
@@ -26,6 +27,9 @@ st.set_page_config(
 
 inject_theme()
 ensure_session_defaults()
+
+render_global_navigation("settings")
+render_workflow_banner("settings")
 
 settings_state: Dict[str, object] = st.session_state.get("finance_settings", {})
 unit = str(settings_state.get("unit", "百万円"))
