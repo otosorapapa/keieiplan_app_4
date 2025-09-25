@@ -445,7 +445,7 @@ def render_home_page() -> None:
     active_label = st.segmented_control(
         "指標タブ",
         TAB_LABELS,
-        selection=previous_label,
+        default=previous_label,
         key="primary_tab_selector",
         label_visibility="collapsed",
     )
