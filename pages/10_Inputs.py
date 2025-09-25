@@ -48,7 +48,7 @@ from theme import inject_theme
 from ui.navigation import render_global_navigation, render_workflow_banner
 from ui.components import render_callout
 from validators import ValidationIssue, validate_bundle
-from ui.streamlit_compat import use_container_width_kwargs
+from ui.streamlit_compat import rerun, use_container_width_kwargs
 from ui.fermi import FERMI_SEASONAL_PATTERNS, compute_fermi_estimate
 
 st.set_page_config(
@@ -1706,7 +1706,7 @@ def _render_fermi_wizard(sales_df: pd.DataFrame, unit: str) -> None:
                 updated_df = _apply_fermi_result(sales_df)
                 st.session_state[SALES_TEMPLATE_STATE_KEY] = updated_df
                 st.toast("Fermi推定を売上テンプレートに反映しました。", icon="✔")
-                st.experimental_rerun()
+                rerun()
 
         if history:
             st.caption(f"過去{len(history)}件の実績学習に基づく中央値補正係数: x{avg_ratio:.2f}")
@@ -2916,7 +2916,7 @@ if current_step == "context":
             st.session_state.pop(AI_CONTEXT_MESSAGE_KEY, None)
             st.session_state.pop(AI_CONTEXT_HIGHLIGHTS_KEY, None)
             st.toast("AI提案メモをクリアしました。", icon="🧹")
-            st.experimental_rerun()
+            rerun()
 
         if generate_clicked:
             try:
@@ -2943,7 +2943,7 @@ if current_step == "context":
                     "text": f"{suggestion.profile_name}向けの草案を挿入しました（文体：{suggestion.tone_label}）。",
                 }
                 st.session_state[AI_CONTEXT_HIGHLIGHTS_KEY] = suggestion.highlights
-            st.experimental_rerun()
+            rerun()
 
         st.caption("※ 生成結果は自動保存されるため、各入力欄で必要に応じて加筆・修正してください。")
 
@@ -4873,7 +4873,7 @@ elif current_step == "tax":
                                 f"{selected_plan.name} v{selected_version.version} を読み込みました。",
                                 icon="✔",
                             )
-                            st.experimental_rerun()
+                            rerun()
                 else:
                     st.info("選択した計画にはバージョンがまだありません。")
 

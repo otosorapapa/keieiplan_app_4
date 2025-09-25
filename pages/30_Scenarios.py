@@ -19,7 +19,7 @@ from models import CapexPlan, LoanSchedule, TaxPolicy
 from state import ensure_session_defaults, load_finance_bundle
 from theme import inject_theme
 from ui.navigation import render_global_navigation, render_workflow_banner
-from ui.streamlit_compat import use_container_width_kwargs
+from ui.streamlit_compat import rerun, use_container_width_kwargs
 
 st.set_page_config(
     page_title="経営計画スタジオ｜シナリオ",
@@ -327,21 +327,21 @@ def _render_scenario_cards(df: pd.DataFrame) -> pd.DataFrame:
         if move_up:
             updated_df = _move_scenario_row(updated_df, index, -1)
             st.session_state["scenario_df"] = _sanitize_scenario_df(updated_df)
-            st.experimental_rerun()
+            rerun()
         if move_down:
             updated_df = _move_scenario_row(updated_df, index, 1)
             st.session_state["scenario_df"] = _sanitize_scenario_df(updated_df)
-            st.experimental_rerun()
+            rerun()
         if duplicate:
             updated_df = _duplicate_scenario_row(updated_df, index)
             st.session_state["scenario_df"] = _sanitize_scenario_df(updated_df)
-            st.experimental_rerun()
+            rerun()
         if delete:
             updated_df = updated_df.drop(updated_df.index[index]).reset_index(drop=True)
             if updated_df.empty:
                 updated_df = _default_scenario_dataframe()
             st.session_state["scenario_df"] = _sanitize_scenario_df(updated_df)
-            st.experimental_rerun()
+            rerun()
 
         note = str(record.get("notes", "")).strip() or "メモは未入力です。"
         st.write(note)
