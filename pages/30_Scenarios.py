@@ -16,6 +16,7 @@ from formatting import format_amount_with_unit, format_delta
 from models import CapexPlan, LoanSchedule, TaxPolicy
 from state import ensure_session_defaults, load_finance_bundle
 from theme import inject_theme
+from ui.navigation import render_global_navigation, render_workflow_banner
 from ui.streamlit_compat import use_container_width_kwargs
 
 st.set_page_config(
@@ -26,6 +27,9 @@ st.set_page_config(
 
 inject_theme()
 ensure_session_defaults()
+
+render_global_navigation("scenarios")
+render_workflow_banner("scenarios")
 
 DRIVER_LABELS: Dict[str, str] = {
     "customers": "客数",

@@ -563,6 +563,7 @@ def _render_tab_selector() -> str:
         _log_event("switch_tab", tab=current)
         _sync_query_params(tab=current)
 
+    st.markdown("<div class='sticky-tab-bar'>", unsafe_allow_html=True)
     selected = st.radio(
         "表示タブ",
         TAB_LABELS,
@@ -572,6 +573,7 @@ def _render_tab_selector() -> str:
         horizontal=True,
         label_visibility="collapsed",
     )
+    st.markdown("</div>", unsafe_allow_html=True)
     return selected
 
 
@@ -611,11 +613,11 @@ def _render_home_summary(ctx: DashboardContext) -> None:
     st.markdown('<div class="dashboard-kpi-row">', unsafe_allow_html=True)
     k1, k2, k3 = st.columns(3)
     with k1:
-        st.metric("売上対予実差[%]", "+4.2pt", "+0.8pt", delta_color="normal")
+        st.metric("📈 売上対予実差[%]", "+4.2pt", "+0.8pt", delta_color="normal")
     with k2:
-        st.metric("粗利率[%]", "32.1%", "-0.8pt", delta_color="inverse")
+        st.metric("💹 粗利率[%]", "32.1%", "-0.8pt", delta_color="inverse")
     with k3:
-        st.metric("資金残高[千円]", "12,300千円", "+320千円", delta_color="normal")
+        st.metric("💰 資金残高[千円]", "12,300千円", "+320千円", delta_color="normal")
     st.markdown("</div>", unsafe_allow_html=True)
     st.caption(f"{ctx.period} / {ctx.store} / {ctx.grain} で集計")
     st.markdown(

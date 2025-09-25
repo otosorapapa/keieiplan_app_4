@@ -164,130 +164,182 @@ h6, .stMarkdown h6 {{ font-size: calc(0.9rem * var(--base-font-scale)); }}
     color: #F5F7FA !important;
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] ul {{
-    padding: 16px 8px 24px 8px;
-    display: grid;
-    gap: 8px;
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] {{
+    display: none !important;
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a {{
+.sidebar-nav__header {{
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.85;
+    margin: 1rem 0 0.6rem 0;
+}}
+
+.sidebar-nav {{
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}}
+
+[data-testid="stSidebar"] button[kind="secondary"] {{
     display: flex;
     align-items: center;
-    gap: calc(0.6rem * (1 - var(--sidebar-compact)) + 0.4rem);
-    padding: 12px 16px;
+    justify-content: flex-start;
+    gap: 0.6rem;
+    padding: 0.75rem 0.9rem;
     border-radius: var(--radius-md);
-    transition: background-color 0.25s ease, gap 0.2s ease, transform 0.25s ease;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.08);
+    color: #F5F7FA;
     font-weight: 600;
-    position: relative;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: background 0.25s ease, transform 0.25s ease;
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a:hover {{
-    background: rgba(255, 255, 255, 0.12);
+[data-testid="stSidebar"] button[kind="secondary"]:hover:not(:disabled) {{
+    background: rgba(255, 255, 255, 0.14);
     transform: translateX(2px);
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-current="page"] {{
-    background: rgba(255, 255, 255, 0.18);
-    border-color: rgba(255, 255, 255, 0.3);
+[data-testid="stSidebar"] button[kind="primary"] {{
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.7rem;
+    padding: 0.85rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.45);
+    background: rgba(255, 255, 255, 0.24);
+    color: #0B1F3B;
+    font-weight: 700;
+    box-shadow: 0 12px 28px rgba(255, 255, 255, 0.18);
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a::before {{
+[data-testid="stSidebar"] button[kind="primary"]:disabled {{
+    color: #0B1F3B;
+}}
+
+[data-testid="stSidebar"] button[kind="secondary"] span,
+[data-testid="stSidebar"] button[kind="primary"] span {{
+    font-size: 1rem;
+    letter-spacing: 0.01em;
+}}
+
+.workflow-banner {{
+    position: sticky;
+    top: 0;
+    z-index: 120;
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-subtle);
+    padding: 1.1rem 1.25rem;
+    margin: -1rem -0.2rem 1.5rem -0.2rem;
+    border: 1px solid var(--border-color);
+}}
+
+.workflow-banner__title {{
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--primary);
+    font-size: 1.05rem;
+}}
+
+.workflow-banner__list {{
+    list-style: none;
+    display: flex;
+    gap: 0.9rem;
+    margin: 0.85rem 0 0.5rem 0;
+    padding: 0;
+    overflow-x: auto;
+}}
+
+.workflow-banner__item {{
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 210px;
+    padding: 0.55rem 0.85rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: var(--surface-alt);
+    transition: border 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}}
+
+.workflow-banner__badge {{
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: calc(2rem - 0.7rem * var(--sidebar-compact));
-    height: calc(2rem - 0.7rem * var(--sidebar-compact));
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.14);
-    margin-right: calc(0.35rem * (1 - var(--sidebar-compact)));
-    font-size: 1.05rem;
+    width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 999px;
+    background: rgba(30, 136, 229, 0.14);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.95rem;
+}}
+
+.workflow-banner__label {{
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}}
+
+.workflow-banner__label-text {{
     font-weight: 600;
-    content: "";
+    color: var(--primary);
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a:hover::before {{
-    background: rgba(255, 255, 255, 0.22);
+.workflow-banner__description {{
+    font-size: 0.85rem;
+    color: var(--text-subtle);
+    line-height: 1.35;
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] span {{
-    opacity: calc(1 - 0.9 * var(--sidebar-compact));
-    transition: opacity 0.25s ease;
-    white-space: nowrap;
-    pointer-events: none;
+.workflow-banner__item--completed {{
+    background: rgba(60, 122, 94, 0.12);
+    border-color: rgba(60, 122, 94, 0.28);
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Home"]::before {{
-    content: "⌂";
+.workflow-banner__item--completed .workflow-banner__badge {{
+    background: var(--positive);
+    color: #ffffff;
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Inputs"]::before {{
-    content: "✎";
+.workflow-banner__item--current {{
+    background: rgba(30, 136, 229, 0.18);
+    border-color: rgba(30, 136, 229, 0.45);
+    box-shadow: 0 14px 32px rgba(30, 136, 229, 0.25);
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Analysis"]::before {{
-    content: "▥";
+.workflow-banner__item--current .workflow-banner__badge {{
+    background: var(--accent);
+    color: #ffffff;
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Scenarios"]::before {{
-    content: "⧉";
+.workflow-banner__item--upcoming {{
+    opacity: 0.9;
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Report"]::before {{
-    content: "⎘";
+.workflow-banner__meta {{
+    font-size: 0.85rem;
+    color: var(--text-subtle);
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Settings"]::before {{
-    content: "⚙";
+.sticky-tab-bar {{
+    position: sticky;
+    top: 136px;
+    z-index: 90;
+    background: var(--surface);
+    padding: 0.7rem 1rem 0.5rem;
+    margin: 0 -0.2rem 1.25rem -0.2rem;
+    border-bottom: 1px solid var(--border-color);
+    box-shadow: 0 18px 30px rgba(11, 31, 59, 0.08);
 }}
 
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child a::before {{
-    content: "⌂";
-}}
-
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child a span,
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Home"] span,
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Inputs"] span,
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Analysis"] span,
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Scenarios"] span,
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Report"] span,
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Settings"] span {{
-    font-size: 0;
-}}
-
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a span::after {{
-    font-size: calc(1rem - 0.2rem * var(--sidebar-compact));
-    color: #F5F7FA;
-    letter-spacing: 0.02em;
-}}
-
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] li:first-child a span::after {{
-    content: "ホーム";
-}}
-
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Home"] span::after {{
-    content: "概要";
-}}
-
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Inputs"] span::after {{
-    content: "入力";
-}}
-
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Analysis"] span::after {{
-    content: "分析";
-}}
-
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Scenarios"] span::after {{
-    content: "シナリオ";
-}}
-
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Report"] span::after {{
-    content: "レポート";
-}}
-
-[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[href*="Settings"] span::after {{
-    content: "設定";
+.sticky-tab-bar [role="radiogroup"] {{
+    justify-content: center;
+    gap: 0.6rem;
 }}
 
 [data-testid="stSidebar"] button:focus-visible,

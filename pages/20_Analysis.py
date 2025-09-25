@@ -29,6 +29,7 @@ from models import (
     DEFAULT_TAX_POLICY,
 )
 from theme import COLOR_BLIND_COLORS, THEME_COLORS, inject_theme
+from ui.navigation import render_global_navigation, render_workflow_banner
 from ui.components import MetricCard, render_metric_cards
 from ui.streamlit_compat import use_container_width_kwargs
 from services.marketing_strategy import (
@@ -1170,6 +1171,9 @@ st.set_page_config(
 
 inject_theme()
 ensure_session_defaults()
+
+render_global_navigation("analysis")
+render_workflow_banner("analysis")
 
 settings_state: Dict[str, object] = st.session_state.get("finance_settings", {})
 unit = str(settings_state.get("unit", "百万円"))

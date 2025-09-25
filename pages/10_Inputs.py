@@ -44,6 +44,7 @@ from services.marketing_strategy import (
     marketing_state_has_content,
 )
 from theme import inject_theme
+from ui.navigation import render_global_navigation, render_workflow_banner
 from ui.components import render_callout
 from validators import ValidationIssue, validate_bundle
 from ui.streamlit_compat import use_container_width_kwargs
@@ -57,6 +58,9 @@ st.set_page_config(
 
 inject_theme()
 ensure_session_defaults()
+
+render_global_navigation("inputs")
+render_workflow_banner("inputs")
 
 finance_raw: Dict[str, Dict] = st.session_state.get("finance_raw", {})
 if not finance_raw:
