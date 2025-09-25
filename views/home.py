@@ -386,84 +386,80 @@ def _sync_query_params(**kwargs: object) -> None:
 def _inject_responsive_styles() -> None:
     """Inject CSS for the <768px responsive breakpoints and helper styles."""
 
+    token_styles = "\n".join(
+        f"            --kp-{name}: {value};" for name, value in DESIGN_TOKENS.items()
+    )
+
     st.markdown(
-        """
+        f"""
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Source+Sans+3:wght@400;600&display=swap');
-        :root {
-            --kp-primary: %(primary)s;
-            --kp-secondary: %(secondary)s;
-            --kp-accent: %(accent)s;
-            --kp-background: %(background)s;
-            --kp-card-bg: %(card_bg)s;
-            --kp-success: %(success)s;
-            --kp-warning: %(warning)s;
-            --kp-error: %(error)s;
-        }
-        html, body, [class*="stApp"]  {
+        :root {{
+{token_styles}
+        }}
+        html, body, [class*="stApp"]  {{
             font-family: "Inter", "Source Sans 3", "Noto Sans JP", sans-serif;
             color: #1A1A1A;
             font-variant-numeric: tabular-nums;
-        }
-        .dashboard-kpi-row, .dashboard-filter-row {
+        }}
+        .dashboard-kpi-row, .dashboard-filter-row {{
             gap: 1.5rem;
-        }
+        }}
         .dashboard-kpi-row > div[data-testid="column"],
-        .dashboard-filter-row > div[data-testid="column"] {
+        .dashboard-filter-row > div[data-testid="column"] {{
             min-width: 0 !important;
-        }
-        .dashboard-kpi-row div[data-testid="metric-container"] {
+        }}
+        .dashboard-kpi-row div[data-testid="metric-container"] {{
             background-color: var(--kp-card-bg);
             border-radius: 12px;
             padding: 1.25rem 1.5rem;
             box-shadow: 0 4px 12px rgba(11, 31, 59, 0.08);
             border: 1px solid rgba(11, 31, 59, 0.08);
-        }
-        div[data-testid="metric-container"] label[data-testid="stMetricLabel"] {
+        }}
+        div[data-testid="metric-container"] label[data-testid="stMetricLabel"] {{
             color: var(--kp-secondary);
             font-weight: 600;
-        }
-        div[data-testid="metric-container"] [data-testid="stMetricValue"] {
+        }}
+        div[data-testid="metric-container"] [data-testid="stMetricValue"] {{
             color: var(--kp-primary);
             font-size: 2rem;
-        }
-        div[data-testid="metric-container"] [data-testid="stMetricDelta"] {
+        }}
+        div[data-testid="metric-container"] [data-testid="stMetricDelta"] {{
             font-size: 0.95rem;
-        }
-        .dashboard-tabs .stTabs [data-baseweb="tab"] {
+        }}
+        .dashboard-tabs .stTabs [data-baseweb="tab"] {{
             background-color: transparent;
             border-bottom: 2px solid transparent;
             padding: 0.75rem 1rem;
             font-weight: 600;
             color: var(--kp-secondary);
-        }
-        .dashboard-tabs .stTabs [aria-selected="true"] {
+        }}
+        .dashboard-tabs .stTabs [aria-selected="true"] {{
             border-bottom-color: var(--kp-primary);
             color: var(--kp-primary);
-        }
-        .dashboard-tabs .stTabs [data-baseweb="tab-list"] {
+        }}
+        .dashboard-tabs .stTabs [data-baseweb="tab-list"] {{
             gap: 0.5rem;
-        }
-        .dashboard-card {
+        }}
+        .dashboard-card {{
             background-color: var(--kp-card-bg);
             border-radius: 12px;
             padding: 1.5rem;
             box-shadow: 0 6px 16px rgba(11, 31, 59, 0.08);
             border: 1px solid rgba(11, 31, 59, 0.08);
-        }
-        @media (max-width: 768px) {
+        }}
+        @media (max-width: 768px) {{
             .dashboard-kpi-row > div[data-testid="column"],
-            .dashboard-filter-row > div[data-testid="column"] {
+            .dashboard-filter-row > div[data-testid="column"] {{
                 flex: 0 0 100% !important;
                 width: 100% !important;
-            }
-            .dashboard-tabs .stTabs {
+            }}
+            .dashboard-tabs .stTabs {{
                 overflow-x: auto;
-            }
-        }
+            }}
+        }}
         </style>
-        """
-        % DESIGN_TOKENS,
+        """,
         unsafe_allow_html=True,
     )
 
