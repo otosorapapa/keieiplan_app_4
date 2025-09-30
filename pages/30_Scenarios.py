@@ -1479,101 +1479,164 @@ with sensitivity_tab:
     st.markdown("---")
     st.subheader("モンテカルロ・シミュレーション")
 
-    mc_config_state = st.session_state.setdefault(
-        "scenario_mc_config",
-        {key: value.copy() for key, value in DEFAULT_MC_CONFIG.items()},
-    )
+    if "scenario_mc_config" not in st.session_state:
+        st.session_state["scenario_mc_config"] = {
+            key: value.copy() for key, value in DEFAULT_MC_CONFIG.items()
+        }
+    if "scenario_mc_trials" not in st.session_state:
+        st.session_state["scenario_mc_trials"] = 5000
+    if "scenario_mc_seed" not in st.session_state:
+        st.session_state["scenario_mc_seed"] = 42
+    if "scenario_mc_metric" not in st.session_state:
+        st.session_state["scenario_mc_metric"] = "fcf"
+    if "scenario_mc_df" not in st.session_state:
+        st.session_state["scenario_mc_df"] = None
+    if "scenario_mc_error" not in st.session_state:
+        st.session_state["scenario_mc_error"] = None
+
+    submitted_mc_form = False
 
     with st.expander("試行設定", expanded=False):
         st.caption("乱数分布と平均・標準偏差（％）を設定できます。")
+        with st.form("scenario_mc_form", clear_on_submit=False):
+            for driver_key, driver_label in DRIVER_LABELS.items():
+                st.markdown(f"**{driver_label}**")
+                cfg = st.session_state["scenario_mc_config"].get(
+                    driver_key, DEFAULT_MC_CONFIG.get(driver_key, {})
+                )
+                col_dist, col_mean, col_std = st.columns([1.2, 1, 1])
+                dist_options = list(DISTRIBUTION_OPTIONS.keys())
+                default_dist = str(cfg.get("distribution", "normal"))
+                if default_dist not in dist_options:
+                    default_dist = dist_options[0]
+                dist_widget_key = f"_mc_dist_widget_{driver_key}"
+                if dist_widget_key not in st.session_state:
+                    st.session_state[dist_widget_key] = default_dist
+                col_dist.selectbox(
+                    "分布",
+                    dist_options,
+                    index=dist_options.index(st.session_state[dist_widget_key]),
+                    format_func=lambda key: DISTRIBUTION_OPTIONS[key],
+                    key=dist_widget_key,
+                )
+                mean_widget_key = f"_mc_mean_widget_{driver_key}"
+                default_mean = float(cfg.get("mean_pct", 0.0))
+                if mean_widget_key not in st.session_state:
+                    st.session_state[mean_widget_key] = default_mean
+                col_mean.number_input(
+                    "平均 (%)",
+                    value=float(st.session_state[mean_widget_key]),
+                    step=0.5,
+                    format="%.2f",
+                    key=mean_widget_key,
+                )
+                std_widget_key = f"_mc_std_widget_{driver_key}"
+                default_std = float(cfg.get("std_pct", 0.0))
+                if std_widget_key not in st.session_state:
+                    st.session_state[std_widget_key] = default_std
+                col_std.number_input(
+                    "標準偏差 (%)",
+                    value=float(st.session_state[std_widget_key]),
+                    min_value=0.0,
+                    max_value=50.0,
+                    step=0.5,
+                    format="%.2f",
+                    key=std_widget_key,
+                )
+            trials_widget_key = "_mc_trials_widget"
+            if trials_widget_key not in st.session_state:
+                st.session_state[trials_widget_key] = int(st.session_state["scenario_mc_trials"])
+            st.number_input(
+                "試行回数",
+                min_value=1000,
+                max_value=100000,
+                step=1000,
+                help="最大10万回まで計算可能です。試行回数を増やすと結果の滑らかさが向上します。",
+                key=trials_widget_key,
+            )
+            seed_widget_key = "_mc_seed_widget"
+            if seed_widget_key not in st.session_state:
+                st.session_state[seed_widget_key] = int(st.session_state["scenario_mc_seed"])
+            st.number_input(
+                "乱数シード",
+                min_value=0,
+                max_value=9999,
+                step=1,
+                key=seed_widget_key,
+            )
+            metric_widget_key = "_mc_metric_widget"
+            metric_options = list(METRIC_LABELS.keys())
+            default_metric = st.session_state["scenario_mc_metric"]
+            if default_metric not in metric_options:
+                default_metric = metric_options[0]
+                st.session_state["scenario_mc_metric"] = default_metric
+            if metric_widget_key not in st.session_state:
+                st.session_state[metric_widget_key] = default_metric
+            st.selectbox(
+                "注目指標",
+                metric_options,
+                index=metric_options.index(st.session_state[metric_widget_key]),
+                format_func=lambda key: METRIC_LABELS[key],
+                key=metric_widget_key,
+            )
+            submitted_mc_form = st.form_submit_button("モンテカルロを実行", type="primary")
+
+    if submitted_mc_form:
         config_updates: Dict[str, Dict[str, float | str]] = {}
-        for driver_key, driver_label in DRIVER_LABELS.items():
-            st.markdown(f"**{driver_label}**")
-            cfg = mc_config_state.get(driver_key, DEFAULT_MC_CONFIG.get(driver_key, {})).copy()
-            col_dist, col_mean, col_std = st.columns([1.2, 1, 1])
-            dist_options = list(DISTRIBUTION_OPTIONS.keys())
-            default_dist = str(cfg.get("distribution", "normal"))
-            dist_index = dist_options.index(default_dist) if default_dist in dist_options else 0
-            distribution = col_dist.selectbox(
-                "分布",
-                dist_options,
-                index=dist_index,
-                format_func=lambda key: DISTRIBUTION_OPTIONS[key],
-                key=f"mc_dist_{driver_key}",
-            )
-            mean_pct = col_mean.number_input(
-                "平均 (%)",
-                value=float(cfg.get("mean_pct", 0.0)),
-                step=0.5,
-                format="%.2f",
-                key=f"mc_mean_{driver_key}",
-            )
-            std_pct = col_std.number_input(
-                "標準偏差 (%)",
-                value=float(cfg.get("std_pct", 0.0)),
-                min_value=0.0,
-                max_value=50.0,
-                step=0.5,
-                format="%.2f",
-                key=f"mc_std_{driver_key}",
-            )
+        for driver_key in DRIVER_LABELS.keys():
             config_updates[driver_key] = {
-                "distribution": distribution,
-                "mean_pct": mean_pct,
-                "std_pct": std_pct,
+                "distribution": st.session_state.get(f"_mc_dist_widget_{driver_key}", "normal"),
+                "mean_pct": float(st.session_state.get(f"_mc_mean_widget_{driver_key}", 0.0)),
+                "std_pct": float(st.session_state.get(f"_mc_std_widget_{driver_key}", 0.0)),
             }
         st.session_state["scenario_mc_config"] = config_updates
-
-        mc_trials = st.number_input(
-            "試行回数",
-            min_value=1000,
-            max_value=100000,
-            value=5000,
-            step=1000,
-            help="最大10万回まで計算可能です。試行回数を増やすと結果の滑らかさが向上します。",
+        st.session_state["scenario_mc_trials"] = int(st.session_state.get("_mc_trials_widget", 5000))
+        st.session_state["scenario_mc_seed"] = int(st.session_state.get("_mc_seed_widget", 42))
+        st.session_state["scenario_mc_metric"] = st.session_state.get(
+            "_mc_metric_widget", st.session_state["scenario_mc_metric"]
         )
-        if mc_trials > 50000:
-            st.warning("非常に多い試行回数のため、完了まで時間がかかる場合があります。")
-        mc_seed = st.number_input("乱数シード", min_value=0, max_value=9999, value=42, step=1)
-        metric_for_mc = st.selectbox(
-            "注目指標",
-            list(METRIC_LABELS.keys()),
-            index=list(METRIC_LABELS.keys()).index("fcf"),
-            format_func=lambda x: METRIC_LABELS[x],
-            key="mc_metric",
-        )
-        run_button = st.button("モンテカルロを実行", key="mc_run_button")
 
-    distribution_payload: Dict[str, Dict[str, float | str]] = {}
-    current_mc_cfg = st.session_state.get("scenario_mc_config", {})
-    for driver_key in DRIVER_LABELS.keys():
-        cfg = current_mc_cfg.get(driver_key, DEFAULT_MC_CONFIG.get(driver_key, {}))
-        distribution_payload[driver_key] = {
-            "distribution": cfg.get("distribution", "normal"),
-            "mean": float(cfg.get("mean_pct", 0.0)) / 100.0,
-            "std": float(cfg.get("std_pct", 0.0)) / 100.0,
-        }
-
-    if run_button:
-        plan_serialized = serialize_plan_config(plan_cfg)
-        capex_dump = bundle.capex.model_dump(mode="json")
-        loans_dump = bundle.loans.model_dump(mode="json")
-        tax_dump = bundle.tax.model_dump(mode="json")
         try:
+            plan_serialized = serialize_plan_config(plan_cfg)
+            capex_dump = bundle.capex.model_dump(mode="json")
+            loans_dump = bundle.loans.model_dump(mode="json")
+            tax_dump = bundle.tax.model_dump(mode="json")
+            distribution_payload = {}
+            for driver_key in DRIVER_LABELS.keys():
+                cfg = st.session_state["scenario_mc_config"].get(
+                    driver_key, DEFAULT_MC_CONFIG.get(driver_key, {})
+                )
+                distribution_payload[driver_key] = {
+                    "distribution": cfg.get("distribution", "normal"),
+                    "mean": float(cfg.get("mean_pct", 0.0)) / 100.0,
+                    "std": float(cfg.get("std_pct", 0.0)) / 100.0,
+                }
             mc_df = run_monte_carlo(
                 plan_serialized,
                 capex_dump,
                 loans_dump,
                 tax_dump,
                 distributions=distribution_payload,
-                metric_key=metric_for_mc,
-                n_trials=int(mc_trials),
-                seed=int(mc_seed),
+                metric_key=st.session_state["scenario_mc_metric"],
+                n_trials=int(st.session_state["scenario_mc_trials"]),
+                seed=int(st.session_state["scenario_mc_seed"]),
             )
-            st.session_state["scenario_mc_df"] = mc_df
         except ValueError as exc:
-            st.error(str(exc))
-            st.session_state.pop("scenario_mc_df", None)
+            st.session_state["scenario_mc_error"] = str(exc)
+            st.session_state["scenario_mc_df"] = None
+        else:
+            st.session_state["scenario_mc_error"] = None
+            st.session_state["scenario_mc_df"] = mc_df
+        st.rerun()
+
+    mc_trials = int(st.session_state["scenario_mc_trials"])
+    if mc_trials > 50000:
+        st.warning("非常に多い試行回数のため、完了まで時間がかかる場合があります。")
+    metric_for_mc = st.session_state["scenario_mc_metric"]
+
+    error_message = st.session_state.get("scenario_mc_error")
+    if error_message:
+        st.error(error_message)
 
     thresholds_risk = st.session_state.get("scenario_thresholds", {})
     var_confidence = float(thresholds_risk.get("var_confidence", 0.95))
